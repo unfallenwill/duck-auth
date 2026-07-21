@@ -1,15 +1,26 @@
 /**
  * Simple in-memory token-bucket rate limiter.
  *
+ * ⚠️  SECURITY WARNING — X-Forwarded-For trust model
+ *     This limiter relies on the `X-Forwarded-For` / `X-Real-IP` headers
+ *     for client identification. In a **direct** deployment (no reverse
+ *     proxy) an attacker can trivially forge these headers and bypass every
+ *     rate limit.
+ *
+ *     This module MUST be deployed behind a trusted reverse proxy (nginx,
+ *     Caddy, Cloudflare, etc.) that **overwrites** the XFF header from
+ *     upstream clients. See README → "Production Deployment" for details.
+ *
  * Per RFC 6749 §5.1 + RFC 7009 §5, the authorization server MUST protect
  * its endpoints from abuse. This is a basic implementation suitable for a
  * single-process deployment. For multi-instance / serverless, replace with
  * a Redis-backed limiter (e.g. @upstash/ratelimit).
  *
  * Default buckets:
- *   - /oauth/token: 20 req/minute per (IP, client_id) — generous enough for
- *     normal refresh flows, tight enough to thwart credential brute-force.
- *   - /oauth/revoke: 30 req/minute per IP.
+ *   - /oauth/token: 20 req/minute per (IP, client_id)
+ *   - /oauth/revoke: 30 req/minute per IP
+ *   - /api/auth/login-post: 5 req/minute per IP
+ *   - /oauth/authorize: 30 req/minute per IP
  */
 
 interface Bucket {
@@ -94,6 +105,24 @@ export function registerRateLimit(req: Request): boolean {
     refillPerMs: 5 / 60_000,
   };
   return take(`register::${ipKey(req)}`, cfg);
+}
+
+/** Login endpoint: 5 req/minute per IP. */
+export function loginRateLimit(req: Request): boolean {
+  const cfg: LimiterConfig = {
+    capacity: 5,
+    refillPerMs: 5 / 60_000,
+  };
+  return take(`login::${ipKey(req)}`, cfg);
+}
+
+/** Authorize endpoint: 30 req/minute per IP. */
+export function authorizeRateLimit(req: Request): boolean {
+  const cfg: LimiterConfig = {
+    capacity: 30,
+    refillPerMs: 30 / 60_000,
+  };
+  return take(`authorize::${ipKey(req)}`, cfg);
 }
 
 /** Reset all buckets (for tests). */
