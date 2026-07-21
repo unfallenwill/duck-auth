@@ -34,8 +34,8 @@ let signIdToken: typeof import("@/lib/oauth/jwt")["signIdToken"];
 let verifyAccessToken: typeof import("@/lib/oauth/jwt")["verifyAccessToken"];
 let getJwks: typeof import("@/lib/oauth/jwt")["getJwks"];
 let ISSUER: string;
-let publicKey: import("jose").KeyLike;
-let otherPrivKey: import("jose").KeyLike;
+let publicKey: CryptoKey;
+let otherPrivKey: CryptoKey;
 
 beforeAll(async () => {
   const { importPKCS8, importSPKI } = await import("jose");
@@ -291,7 +291,7 @@ describe("getJwks", () => {
 
     expect(key.kty).toBe("RSA");
     expect(typeof key.n).toBe("string");
-    expect(key.n.length).toBeGreaterThan(0);
+    expect(key.n!.length).toBeGreaterThan(0);
     expect(typeof key.e).toBe("string");
   });
 

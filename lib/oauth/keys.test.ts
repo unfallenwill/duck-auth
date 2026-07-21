@@ -38,7 +38,7 @@ describe("loadKeys", () => {
   beforeEach(() => {
     keysPath = makeTempKeysPath();
     // Ensure dev mode by default
-    process.env["NODE_ENV"] = "development";
+    (process.env as Record<string, string>)['NODE_ENV'] = "development";
     // Reset module cache so keysPromise is cleared
     vi.resetModules();
   });
@@ -48,7 +48,7 @@ describe("loadKeys", () => {
     if (existsSync(keysPath)) {
       rmSync(keysPath, { force: true });
     }
-    process.env["NODE_ENV"] = originalNodeEnv;
+    (process.env as Record<string, string | undefined>)['NODE_ENV'] = originalNodeEnv;
     vi.restoreAllMocks();
   });
 
@@ -156,7 +156,7 @@ describe("loadKeys", () => {
   });
 
   it("throws in production when keys file does not exist", async () => {
-    process.env["NODE_ENV"] = "production";
+    (process.env as Record<string, string>)['NODE_ENV'] = "production";
 
     vi.doMock("@/lib/config", () => ({
       config: { keysPath },
@@ -168,7 +168,7 @@ describe("loadKeys", () => {
   });
 
   it("throws in production when keys file is corrupted", async () => {
-    process.env["NODE_ENV"] = "production";
+    (process.env as Record<string, string>)['NODE_ENV'] = "production";
     writeFileSync(keysPath, "CORRUPT {{{ }}", "utf8");
 
     vi.doMock("@/lib/config", () => ({
