@@ -16,7 +16,40 @@ const RegisterSchema = z.object({
     .default(["openid", "profile", "email"]),
 });
 
+/**
+ * POST /oauth/register (RFC 7591 — Dynamic Client Registration).
+ *
+ * If `DCR_INITIAL_TOKEN` env var is set, the request must include a
+ * matching `Authorization: Bearer <token>` header. This implements
+ * RFC 7591 §3 "Initial Access Token" protection.
+ *
+ * If `DCR_INITIAL_TOKEN` is not set (dev/demo mode), registration is open.
+ * The discovery document advertises this via `dcr_protected` = false.
+ */
 export async function POST(req: Request) {
+  // --- Initial Access Token check (if configured) ---
+  const dcrToken = process.env["DCR_INITIAL_TOKEN"];
+  if (dcrToken) {
+    const auth = req.headers.get("authorization") ?? "";
+    const match = auth.match(/^Bearer\s+(.+)$/i);
+    const presented = match?.[1];
+    if (!presented || presented !== dcrToken) {
+      return new Response(
+        JSON.stringify({
+          error: "invalid_token",
+          error_description: "Initial Access Token required for registration",
+        }),
+        {
+          status: 401,
+          headers: {
+            "Content-Type": "application/json",
+            "WWW-Authenticate": 'Bearer realm="oauth/register"',
+          },
+        },
+      );
+    }
+  }
+
   let body: unknown;
   try {
     body = await req.json();
