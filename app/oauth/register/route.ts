@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/generated/prisma-client";
 import {
@@ -42,7 +43,13 @@ export async function POST(req: Request) {
     const auth = req.headers.get("authorization") ?? "";
     const match = auth.match(/^Bearer\s+(.+)$/i);
     const presented = match?.[1];
-    if (!presented || presented !== dcrToken) {
+    let tokenValid = false;
+    if (presented) {
+      const a = Buffer.from(presented);
+      const b = Buffer.from(dcrToken);
+      tokenValid = a.length === b.length && timingSafeEqual(a, b);
+    }
+    if (!tokenValid) {
       return new Response(
         JSON.stringify({
           error: "invalid_token",

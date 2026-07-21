@@ -64,6 +64,17 @@ function loadConfig(): Config {
     raw.sessionSecret = SESSION_COOKIE_DEV_FALLBACK;
   }
 
+  // Warn if DCR_INITIAL_TOKEN is not set in production (Issue #15).
+  // Without it, the register endpoint is open to anyone — fine for demos,
+  // but a security risk in production.
+  if (isProd && !process.env["DCR_INITIAL_TOKEN"]) {
+    console.warn(
+      "[config] DCR_INITIAL_TOKEN is not set — dynamic client registration " +
+        "is unprotected (fail-open). Set DCR_INITIAL_TOKEN to require an " +
+        "Initial Access Token for /oauth/register.",
+    );
+  }
+
   return ConfigSchema.parse(raw);
 }
 
