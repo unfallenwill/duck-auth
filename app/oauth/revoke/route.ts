@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/generated/prisma-client";
-import { authenticateClient, readFormBody } from "@/lib/oauth/client-auth";
+import { authenticateClient } from "@/lib/oauth/client-auth";
+import { readFormBody } from "@/lib/oauth/http";
 import { revokeRateLimit } from "@/lib/oauth/rate-limit";
 
 /**

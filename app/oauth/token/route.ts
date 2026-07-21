@@ -10,9 +10,11 @@ import {
 } from "@/lib/oauth/jwt";
 import {
   authenticateClient,
+} from "@/lib/oauth/client-auth";
+import {
   readFormBody,
   tokenResponse,
-} from "@/lib/oauth/client-auth";
+} from "@/lib/oauth/http";
 import { tokenRateLimit } from "@/lib/oauth/rate-limit";
 
 const ACCESS_TOKEN_TTL = 60 * 60; // 1h

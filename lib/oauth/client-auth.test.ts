@@ -31,9 +31,11 @@ vi.mock("@/lib/generated/prisma-client", () => ({
 import { hashClientSecret } from "@/lib/oauth/crypto";
 import {
   authenticateClient,
+} from "@/lib/oauth/client-auth";
+import {
   readFormBody,
   tokenResponse,
-} from "@/lib/oauth/client-auth";
+} from "@/lib/oauth/http";
 
 function makeReq(headers: Record<string, string> = {}): Request {
   return new Request("http://x/test", { headers });
