@@ -72,3 +72,4 @@ CLAUDE.md
 # debug artifacts
 cookies*.txt
 staged-files.txt
+/public/

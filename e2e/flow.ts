@@ -1,5 +1,5 @@
 /**
- * End-to-end OAuth flow test for next-hello.
+ * End-to-end OAuth flow test for duck-auth.
  *
  * Steps:
  *   1. Login (POST /login) → set oauth_session cookie
