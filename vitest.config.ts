@@ -14,9 +14,9 @@ export default defineConfig({
         "lib/**/*.test.ts",
       ],
       thresholds: {
-        lines: 60,
-        functions: 60,
-        statements: 60,
+        lines: 80,
+        functions: 80,
+        statements: 80,
       },
     },
   },
