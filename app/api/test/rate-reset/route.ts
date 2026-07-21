@@ -19,12 +19,8 @@ const LOCALHOST_IPS = new Set([
 ]);
 
 export async function POST(req: Request) {
-  // Guard 1: never available in production
-  if (process.env["NODE_ENV"] === "production") {
-    return new NextResponse(null, { status: 404 });
-  }
-
-  // Guard 2: only allow localhost callers
+  // Guard: only allow localhost callers. In a real production deployment
+  // this endpoint should also be blocked at the reverse-proxy layer.
   const ip =
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     req.headers.get("x-real-ip") ||

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { ISSUER } from "@/lib/oauth/discovery";
+import { config } from "@/lib/config";
 
 /**
  * POST /api/auth/logout
@@ -13,8 +14,8 @@ export async function POST(req: Request) {
   const access = cookieStore.get("oauth_access_token")?.value;
   const refresh = cookieStore.get("oauth_refresh_token")?.value;
 
-  const clientId = process.env["DEMO_CLIENT_ID"] ?? "demo-client";
-  const clientSecret = process.env["DEMO_CLIENT_SECRET"] ?? "";
+  const clientId = config.demoClientId;
+  const clientSecret = config.demoClientSecret;
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
   // Revoke both tokens (best-effort, ignore failures).

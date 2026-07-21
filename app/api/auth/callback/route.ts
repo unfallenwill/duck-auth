@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { cookieDefaults } from "@/lib/oauth/cookies";
 import { ISSUER } from "@/lib/oauth/discovery";
+import { config } from "@/lib/config";
 
 /**
  * GET /api/auth/callback
@@ -41,11 +42,9 @@ export async function GET(req: Request) {
   }
 
   // Exchange code for tokens.
-  const clientId = process.env["DEMO_CLIENT_ID"] ?? "demo-client";
-  const clientSecret = process.env["DEMO_CLIENT_SECRET"] ?? "";
-  const redirectUri =
-    process.env["DEMO_REDIRECT_URI"] ??
-    "http://localhost:3000/api/auth/callback";
+  const clientId = config.demoClientId;
+  const clientSecret = config.demoClientSecret;
+  const redirectUri = config.demoRedirectUri;
 
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   const tokenRes = await fetch(`${ISSUER}/oauth/token`, {

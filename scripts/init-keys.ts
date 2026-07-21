@@ -12,7 +12,9 @@ import { generateKeyPairSync } from "node:crypto";
 import { existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-const KEYS_PATH = process.env["OAUTH_KEYS_PATH"] ?? "./.oauth-keys.json";
+import { config } from "../lib/config";
+
+const KEYS_PATH = config.keysPath;
 const KID = "key-1";
 const force = process.argv.includes("--force");
 

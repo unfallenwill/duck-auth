@@ -1,7 +1,9 @@
+import { config } from "@/lib/config";
+
 export const SUPPORTED_SCOPES = ["openid", "profile", "email"] as const;
 export type SupportedScope = (typeof SUPPORTED_SCOPES)[number];
 
-export const ISSUER = process.env["OAUTH_ISSUER"] ?? "http://localhost:3000";
+export const ISSUER = config.issuer;
 
 export function discoveryDocument() {
   return {

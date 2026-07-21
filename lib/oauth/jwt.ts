@@ -7,36 +7,13 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { uuid } from "@/lib/oauth/crypto";
 import { ISSUER } from "@/lib/oauth/discovery";
+import { config, SESSION_COOKIE_DEV_FALLBACK } from "@/lib/config";
+
+// Re-export for backwards compatibility (e2e tests import this).
+export { SESSION_COOKIE_DEV_FALLBACK };
+
 const KID = "key-1";
-const KEYS_PATH =
-  process.env["OAUTH_KEYS_PATH"] ?? "./.oauth-keys.json";
-
-/**
- * Fail-loud checks for production-required secrets.
- *
- * In production these MUST be set explicitly. In dev/test we fall back to a
- * placeholder so local development keeps working, but we log a warning so it
- * doesn't go unnoticed.
- */
-function assertProductionSecrets(): void {
-  const sessionSecret = process.env["OAUTH_SESSION_SECRET"];
-  const isProd = process.env["NODE_ENV"] === "production";
-
-  if (!sessionSecret) {
-    if (isProd) {
-      throw new Error(
-        "OAUTH_SESSION_SECRET is required in production. " +
-          "Generate one with: openssl rand -base64 48",
-      );
-    }
-    console.warn(
-      "[oauth] OAUTH_SESSION_SECRET not set — using insecure dev fallback. " +
-        "DO NOT deploy without setting it.",
-    );
-  }
-}
-
-assertProductionSecrets();
+const KEYS_PATH = config.keysPath;
 
 interface PersistedKeys {
   kid: string;
@@ -143,15 +120,7 @@ export interface AccessTokenClaims {
   iss: string;
 }
 
-/**
- * Dev-only fallback for the session-cookie HMAC secret. Shared between the
- * server (lib/oauth/jwt.ts) and the e2e test (e2e/flow.ts) so that signing
- * and verification use the same string when OAUTH_SESSION_SECRET is unset.
- *
- * NEVER use in production — `assertProductionSecrets()` enforces that.
- */
-export const SESSION_COOKIE_DEV_FALLBACK =
-  "dev-only-change-me-32-bytes-please-please";
+// (SESSION_COOKIE_DEV_FALLBACK is imported from @/lib/config and re-exported above.)
 
 /** Sign an access token (JWT, RS256). */
 export async function signAccessToken(payload: {
@@ -222,8 +191,7 @@ export async function verifyAccessToken(
 
 /** Sign the session cookie (HMAC HS256). Internal — not exposed to clients. */
 async function getSessionSecret(): Promise<Uint8Array> {
-  const value = process.env["OAUTH_SESSION_SECRET"] ?? SESSION_COOKIE_DEV_FALLBACK;
-  return new TextEncoder().encode(value);
+  return new TextEncoder().encode(config.sessionSecret);
 }
 
 export async function signSessionCookie(

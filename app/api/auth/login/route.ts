@@ -6,6 +6,7 @@ import {
   codeChallengeS256,
 } from "@/lib/oauth/crypto";
 import { cookieDefaults } from "@/lib/oauth/cookies";
+import { config } from "@/lib/config";
 
 /**
  * GET /api/auth/login
@@ -13,11 +14,9 @@ import { cookieDefaults } from "@/lib/oauth/cookies";
  * Stores state + code_verifier in cookies, then redirects to /oauth/authorize.
  */
 export async function GET(req: Request) {
-  const clientId = process.env["DEMO_CLIENT_ID"] ?? "demo-client";
-  const redirectUri =
-    process.env["DEMO_REDIRECT_URI"] ??
-    "http://localhost:3000/api/auth/callback";
-  const issuer = (await import("@/lib/oauth/discovery")).ISSUER;
+  const clientId = config.demoClientId;
+  const redirectUri = config.demoRedirectUri;
+  const issuer = config.issuer;
 
   // Generate anti-CSRF state + PKCE pair.
   const state = randomToken(24);

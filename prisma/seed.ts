@@ -5,9 +5,9 @@ import {
   hashPassword,
   hashClientSecret,
 } from "../lib/oauth/crypto";
+import { config } from "../lib/config";
 
-const url = process.env["DATABASE_URL"] ?? "file:./dev.db";
-const adapter = new PrismaLibSql({ url });
+const adapter = new PrismaLibSql({ url: config.databaseUrl });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
@@ -30,10 +30,9 @@ async function main() {
   console.log(`  ✓ user: ${user.email} (id=${user.id})`);
 
   // Demo client (matches DEMO_CLIENT_ID in .env)
-  const demoClientId = process.env["DEMO_CLIENT_ID"] ?? "demo-client";
-  const demoClientSecret = process.env["DEMO_CLIENT_SECRET"] ?? "demo-secret-change-me";
-  const demoRedirectUri =
-    process.env["DEMO_REDIRECT_URI"] ?? "http://localhost:3000/api/auth/callback";
+  const demoClientId = config.demoClientId;
+  const demoClientSecret = config.demoClientSecret;
+  const demoRedirectUri = config.demoRedirectUri;
 
   await prisma.client.deleteMany({ where: { id: demoClientId } });
   const client = await prisma.client.create({
