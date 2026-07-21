@@ -61,7 +61,10 @@ export function verifyPkceS256(
   codeChallenge: string,
 ): boolean {
   const hash = createHash("sha256").update(codeVerifier).digest("base64url");
-  return timingSafeEqual(Buffer.from(hash), Buffer.from(codeChallenge));
+  const a = Buffer.from(hash);
+  const b = Buffer.from(codeChallenge);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 /** Generate a code_verifier (43-128 chars from [A-Z][a-z][0-9]-._~). */

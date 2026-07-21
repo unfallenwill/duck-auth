@@ -53,7 +53,7 @@ export async function signAccessToken(payload: {
 /** Sign an id_token (OIDC). */
 export async function signIdToken(payload: {
   sub: string;
-  email: string;
+  email?: string;
   name?: string | null;
   clientId: string;
   ttlSeconds: number;
@@ -62,7 +62,7 @@ export async function signIdToken(payload: {
   const now = Math.floor(Date.now() / 1000);
   const exp = now + payload.ttlSeconds;
   const token = await new SignJWT({
-    email: payload.email,
+    ...(payload.email ? { email: payload.email } : {}),
     ...(payload.name ? { name: payload.name } : {}),
   })
     .setProtectedHeader({ alg: "RS256", typ: "JWT", kid: KID })

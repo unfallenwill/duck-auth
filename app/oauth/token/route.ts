@@ -50,11 +50,12 @@ async function issueTokenSet(
   });
 
   let idToken: string | undefined;
-  if (scopes.split(/\s+/).includes("openid")) {
+  const scopeList = scopes.split(/\s+/);
+  if (scopeList.includes("openid")) {
     const id = await signIdToken({
       sub: user.id,
-      email: user.email,
-      name: user.name,
+      ...(scopeList.includes("email") ? { email: user.email } : {}),
+      ...(scopeList.includes("profile") ? { name: user.name } : {}),
       clientId,
       ttlSeconds: ID_TOKEN_TTL,
     });
