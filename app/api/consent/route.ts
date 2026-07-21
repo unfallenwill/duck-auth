@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/generated/prisma-client";
 import { recordConsent } from "@/lib/oauth/consent";
-import { verifySessionCookie } from "@/lib/oauth/jwt";
+import { verifySessionCookie } from "@/lib/oauth/session";
 import {
   authorizeError,
   type OAuthErrorCode,

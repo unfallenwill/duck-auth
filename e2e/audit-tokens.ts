@@ -6,7 +6,7 @@ import { PrismaClient } from "../lib/generated/prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 import { SignJWT, decodeJwt, decodeProtectedHeader } from "jose";
 import { createHash, randomBytes } from "node:crypto";
-import { SESSION_COOKIE_DEV_FALLBACK } from "../lib/oauth/jwt";
+import { SESSION_COOKIE_DEV_FALLBACK } from "../lib/config";
 
 const BASE = "http://localhost:3000";
 const url = process.env["DATABASE_URL"] ?? "file:./dev.db";

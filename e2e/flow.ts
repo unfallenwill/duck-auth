@@ -337,7 +337,7 @@ async function main() {
 
 async function createSessionCookie(userId: string): Promise<string> {
   const { SignJWT } = await import("jose");
-  const { SESSION_COOKIE_DEV_FALLBACK } = await import("../lib/oauth/jwt");
+  const { SESSION_COOKIE_DEV_FALLBACK } = await import("../lib/config");
   const secret = new TextEncoder().encode(
     process.env["OAUTH_SESSION_SECRET"] ?? SESSION_COOKIE_DEV_FALLBACK,
   );

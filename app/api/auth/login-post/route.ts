@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/generated/prisma-client";
 import { verifyPassword } from "@/lib/oauth/crypto";
-import { signSessionCookie } from "@/lib/oauth/jwt";
+import { signSessionCookie } from "@/lib/oauth/session";
 import { cookieDefaults } from "@/lib/oauth/cookies";
 
 /**

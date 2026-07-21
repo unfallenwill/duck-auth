@@ -17,7 +17,7 @@ import { PrismaClient } from "../lib/generated/prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 import { recordConsent } from "../lib/oauth/consent";
 import { SignJWT } from "jose";
-import { SESSION_COOKIE_DEV_FALLBACK } from "../lib/oauth/jwt";
+import { SESSION_COOKIE_DEV_FALLBACK } from "../lib/config";
 
 const url = process.env["DATABASE_URL"] ?? "file:./dev.db";
 const adapter = new PrismaLibSql({ url });

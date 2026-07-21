@@ -12,7 +12,7 @@ import {
 import {
   randomToken,
 } from "@/lib/oauth/crypto";
-import { verifySessionCookie } from "@/lib/oauth/jwt";
+import { verifySessionCookie } from "@/lib/oauth/session";
 
 const CODE_TTL_SECONDS = 60 * 10; // 10 minutes
 
