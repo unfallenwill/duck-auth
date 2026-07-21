@@ -104,6 +104,23 @@ vitest.config.ts
 3. Run `npm run db:keys:init` to generate persistent RSA keys
 4. Set up cron: `npm run db:cleanup` daily to purge expired tokens
 5. Block `/api/test/rate-reset` at the reverse proxy
+6. **Reverse proxy REQUIRED** — The rate limiter identifies clients via the
+   `X-Forwarded-For` header. In a direct deployment (no proxy), attackers can
+   forge this header to bypass all rate limits. Always deploy behind a trusted
+   reverse proxy (nginx, Caddy, Cloudflare, etc.) and ensure it **overwrites**
+   (not appends to) the `X-Forwarded-For` header from downstream clients.
+
+   **nginx example:**
+   ```nginx
+   proxy_set_header X-Forwarded-For $remote_addr;
+   ```
+
+   **Caddy example:**
+   ```caddyfile
+   reverse_proxy localhost:3000 {
+     header_up X-Forwarded-For {remote_host}
+   }
+   ```
 
 ## License
 

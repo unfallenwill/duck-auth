@@ -13,6 +13,7 @@ import {
   randomToken,
 } from "@/lib/oauth/crypto";
 import { verifySessionCookie } from "@/lib/oauth/session";
+import { authorizeRateLimit } from "@/lib/oauth/rate-limit";
 
 const CODE_TTL_SECONDS = 60 * 10; // 10 minutes
 
@@ -105,6 +106,14 @@ export async function GET(req: Request) {
     const nextUrl = new URL("/login", req.url);
     nextUrl.searchParams.set("next", url.pathname + url.search);
     return Response.redirect(nextUrl, 302);
+  }
+
+  // --- Rate limit: 30 authorize requests/minute/IP (after auth check) ---
+  if (!authorizeRateLimit(req)) {
+    return Response.json(
+      { error: "slow_down", error_description: "Too many requests. Please slow down." },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
   }
 
   // --- Consent: skip if user already consented to (client, scopes) ---
