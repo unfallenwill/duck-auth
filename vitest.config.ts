@@ -13,6 +13,11 @@ export default defineConfig({
         "lib/generated/**",
         "lib/**/*.test.ts",
       ],
+      thresholds: {
+        lines: 60,
+        functions: 60,
+        statements: 60,
+      },
     },
   },
   resolve: {
