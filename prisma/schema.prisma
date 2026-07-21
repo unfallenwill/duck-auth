@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  consents      Consent[]
+  authCodes     AuthorizationCode[]
+  accessTokens  AccessToken[]
+  refreshTokens RefreshToken[]
+}
+
+model Client {
+  id             String   @id
+  name           String
+  secretHash     String
+  redirectUris   String   // JSON-encoded string[]
+  allowedScopes  String   // space-separated
+  createdAt      DateTime @default(now())
+
+  authCodes      AuthorizationCode[]
+  accessTokens   AccessToken[]
+  refreshTokens  RefreshToken[]
+  consents       Consent[]
+}
+
+model Consent {
+  id        String   @id @default(cuid())
+  userId    String
+  clientId  String
+  scopes    String   // space-separated
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientId])
+}
+
+model AuthorizationCode {
+  code                String   @id
+  clientId            String
+  userId              String
+  redirectUri         String
+  scopes              String
+  codeChallenge       String?
+  codeChallengeMethod String?
+  expiresAt           DateTime
+  usedAt              DateTime?
+  createdAt           DateTime @default(now())
+
+  client              Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AccessToken {
+  jti        String    @id
+  clientId   String
+  userId     String
+  scopes     String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  client     Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model RefreshToken {
+  token      String    @id
+  clientId   String
+  userId     String
+  scopes     String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  client     Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
