@@ -3,6 +3,12 @@
  *
  * Uses a separate symmetric secret (OAUTH_SESSION_SECRET) — completely
  * isolated from the RS256 key pair used for OAuth JWTs.
+ *
+ * LIMITATION: Session cookies are stateless JWTs — once issued they cannot
+ * be revoked before expiry. The default TTL is intentionally short (2 hours)
+ * to limit the window of abuse if a cookie is stolen. If server-side
+ * revocation is required, wrap verification with a deny-list store (e.g.
+ * Redis) or switch to opaque server-side sessions.
  */
 import { SignJWT, jwtVerify } from "jose";
 import { config } from "@/lib/config";
@@ -13,7 +19,7 @@ async function getSessionSecret(): Promise<Uint8Array> {
 
 export async function signSessionCookie(
   userId: string,
-  ttlSeconds = 60 * 60 * 24 * 7,
+  ttlSeconds = 60 * 60 * 2,
 ): Promise<{ value: string; expiresAt: Date }> {
   const secret = await getSessionSecret();
   const now = Math.floor(Date.now() / 1000);

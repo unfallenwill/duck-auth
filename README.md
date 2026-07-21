@@ -122,6 +122,21 @@ vitest.config.ts
    }
    ```
 
+### Session Cookie Security
+
+Session cookies are **stateless JWTs** signed with `OAUTH_SESSION_SECRET`.
+Because they are not stored server-side, they **cannot be revoked** before
+expiry. The default session TTL is **2 hours** to limit the exposure window if
+a cookie is stolen. If your threat model requires immediate revocation, consider
+one of the following:
+
+- **Deny-list**: check a fast KV store (Redis, etc.) on every request to see
+  if the session `jti` or `uid` has been revoked.
+- **Opaque sessions**: replace the JWT cookie with a random opaque token stored
+  in a server-side session table; delete the row to revoke immediately.
+- **Shorter TTL + refresh**: reduce the TTL further and implement a silent
+  refresh flow so legitimate users are not inconvenienced.
+
 ## License
 
 MIT 🦆
