@@ -24,6 +24,11 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Generate OAuth keys
+        run: npm run db:keys:init
+        env:
+          OAUTH_SESSION_SECRET: ci-test-secret-not-for-production-use-only-32b
+
       - name: Lint
         run: npm run lint
 
@@ -35,6 +40,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          OAUTH_SESSION_SECRET: ci-test-secret-not-for-production-use-only-32b
 
       - name: Security audit
         run: npm audit --audit-level=high
