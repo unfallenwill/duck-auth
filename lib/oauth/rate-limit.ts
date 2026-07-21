@@ -87,6 +87,15 @@ export function revokeRateLimit(req: Request): boolean {
   return take(`revoke::${ipKey(req)}`, cfg);
 }
 
+/** Register endpoint: 5 req/minute per IP. */
+export function registerRateLimit(req: Request): boolean {
+  const cfg: LimiterConfig = {
+    capacity: 5,
+    refillPerMs: 5 / 60_000,
+  };
+  return take(`register::${ipKey(req)}`, cfg);
+}
+
 /** Reset all buckets (for tests). */
 export function _resetRateLimit(): void {
   buckets.clear();

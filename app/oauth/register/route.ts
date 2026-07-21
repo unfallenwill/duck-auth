@@ -6,6 +6,7 @@ import {
 } from "@/lib/oauth/crypto";
 import { tokenError } from "@/lib/oauth/errors";
 import { SUPPORTED_SCOPES } from "@/lib/oauth/discovery";
+import { registerRateLimit } from "@/lib/oauth/rate-limit";
 
 const RegisterSchema = z.object({
   client_name: z.string().min(1).max(100),
@@ -27,6 +28,14 @@ const RegisterSchema = z.object({
  * The discovery document advertises this via `dcr_protected` = false.
  */
 export async function POST(req: Request) {
+  // Rate limit: 5 registrations per minute per IP.
+  if (!registerRateLimit(req)) {
+    return new Response(
+      JSON.stringify({ error: "rate_limited", error_description: "Too many registration requests" }),
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+
   // --- Initial Access Token check (if configured) ---
   const dcrToken = process.env["DCR_INITIAL_TOKEN"];
   if (dcrToken) {
