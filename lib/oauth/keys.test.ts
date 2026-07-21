@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { generateKeyPairSync } from "node:crypto";
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -67,11 +67,7 @@ describe("loadKeys", () => {
     // File should have been persisted
     expect(existsSync(keysPath)).toBe(true);
 
-    const raw = JSON.parse(
-      // readFileSync is safe here — we just wrote it
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require("node:fs").readFileSync(keysPath, "utf8"),
-    );
+    const raw = JSON.parse(readFileSync(keysPath, "utf8"));
     expect(raw.kid).toBe("key-1");
     expect(raw.publicKey).toContain("BEGIN PUBLIC KEY");
     expect(raw.privateKey).toContain("BEGIN PRIVATE KEY");
@@ -100,10 +96,7 @@ describe("loadKeys", () => {
     expect(keys.privateKey).toBeDefined();
     expect(keys.publicKey).toBeDefined();
     // Should not overwrite the file — it already existed
-    const raw = JSON.parse(
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require("node:fs").readFileSync(keysPath, "utf8"),
-    );
+    const raw = JSON.parse(readFileSync(keysPath, "utf8"));
     expect(raw.publicKey).toBe(pair.publicKey);
   });
 
@@ -123,31 +116,30 @@ describe("loadKeys", () => {
     expect(keys.publicKey).toBeDefined();
 
     // File should now contain valid JSON
-    const raw = JSON.parse(
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require("node:fs").readFileSync(keysPath, "utf8"),
-    );
+    const raw = JSON.parse(readFileSync(keysPath, "utf8"));
     expect(raw.kid).toBe("key-1");
     expect(raw.publicKey).toContain("BEGIN PUBLIC KEY");
   });
 
   it("regenerates keys when file has valid JSON but missing key fields (dev)", async () => {
-    // Valid JSON but no actual key data
+    // Valid JSON but no actual key data — the validation guard in loadKeys
+    // silently falls through to the regeneration path
     writeFileSync(keysPath, JSON.stringify({ foo: "bar" }), "utf8");
 
     vi.doMock("@/lib/config", () => ({
       config: { keysPath },
     }));
 
-    const constMock = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     const { loadKeys } = await import("@/lib/oauth/keys");
     const keys = await loadKeys();
 
     expect(keys.privateKey).toBeDefined();
     expect(keys.publicKey).toBeDefined();
-    // The validation guard should have triggered a regen
-    expect(constMock).toHaveBeenCalled();
+
+    // File should have been overwritten with valid keys
+    const raw = JSON.parse(readFileSync(keysPath, "utf8"));
+    expect(raw.kid).toBe("key-1");
+    expect(raw.publicKey).toContain("BEGIN PUBLIC KEY");
   });
 
   it("caches keys across calls (returns same promise)", async () => {
