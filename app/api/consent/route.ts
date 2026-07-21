@@ -7,6 +7,10 @@ import {
   authorizeError,
   type OAuthErrorCode,
 } from "@/lib/oauth/errors";
+import {
+  filterScopes,
+  parseScopes,
+} from "@/lib/oauth/discovery";
 
 /**
  * POST /api/consent
@@ -60,14 +64,27 @@ export async function POST(req: Request) {
     return NextResponse.redirect(target, 303);
   }
 
+  // Validate scopes against the client's allowed list.
+  const { valid, invalid } = filterScopes(
+    parseScopes(scope),
+    client.allowedScopes,
+  );
+  if (invalid.length > 0) {
+    return NextResponse.json(
+      { error: "invalid_scope", error_description: `Disallowed scopes: ${invalid.join(", ")}` },
+      { status: 400 },
+    );
+  }
+  const safeScope = valid.join(" ");
+
   // Persist the consent and bounce back to /oauth/authorize with the
   // original PKCE + state params.
-  await recordConsent(session.uid, clientId, scope);
+  await recordConsent(session.uid, clientId, safeScope);
   const target = new URL("/oauth/authorize", req.url);
   target.searchParams.set("response_type", "code");
   target.searchParams.set("client_id", clientId);
   target.searchParams.set("redirect_uri", redirectUri);
-  target.searchParams.set("scope", scope);
+  target.searchParams.set("scope", safeScope);
   target.searchParams.set("state", state);
   if (codeChallenge) {
     target.searchParams.set("code_challenge", codeChallenge);
