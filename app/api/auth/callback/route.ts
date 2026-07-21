@@ -1,8 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { cookieDefaults } from "@/lib/oauth/cookies";
-
-const ISSUER = process.env["OAUTH_ISSUER"] ?? "http://localhost:3000";
+import { ISSUER } from "@/lib/oauth/discovery";
 
 /**
  * GET /api/auth/callback

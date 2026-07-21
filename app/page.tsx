@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-const ISSUER = process.env["OAUTH_ISSUER"] ?? "http://localhost:3000";
+import { ISSUER } from "@/lib/oauth/discovery";
 
 async function fetchUserInfo(accessToken: string) {
   const res = await fetch(`${ISSUER}/oauth/userinfo`, {

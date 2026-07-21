@@ -17,7 +17,7 @@ export async function GET(req: Request) {
   const redirectUri =
     process.env["DEMO_REDIRECT_URI"] ??
     "http://localhost:3000/api/auth/callback";
-  const issuer = process.env["OAUTH_ISSUER"] ?? "http://localhost:3000";
+  const issuer = (await import("@/lib/oauth/discovery")).ISSUER;
 
   // Generate anti-CSRF state + PKCE pair.
   const state = randomToken(24);

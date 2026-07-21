@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
-
-const ISSUER = process.env["OAUTH_ISSUER"] ?? "http://localhost:3000";
+import { ISSUER } from "@/lib/oauth/discovery";
 
 /**
  * GET /api/auth/me

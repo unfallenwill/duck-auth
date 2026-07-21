@@ -6,8 +6,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { uuid } from "@/lib/oauth/crypto";
-
-const ISSUER = process.env["OAUTH_ISSUER"] ?? "http://localhost:3000";
+import { ISSUER } from "@/lib/oauth/discovery";
 const KID = "key-1";
 const KEYS_PATH =
   process.env["OAUTH_KEYS_PATH"] ?? "./.oauth-keys.json";
