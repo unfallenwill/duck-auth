@@ -53,27 +53,33 @@ export async function POST(req: Request) {
     });
   }
 
-  // Path 2: access token (JWT). Decode without verify, look up by jti, and
-  // ensure it belongs to the authenticated client.
+  // Path 2: access token (JWT). Decode without verify, look up by jti.
+  // Only catch parse/decode errors (malformed token) — let DB errors
+  // propagate so they surface as 500s rather than silently failing.
+  let jti: string | undefined;
   try {
     const parts = token.split(".");
     if (parts.length === 3) {
       const payload = JSON.parse(
         Buffer.from(parts[1]!, "base64url").toString("utf8"),
       );
-      const jti = payload.jti;
-      if (typeof jti === "string") {
-        const access = await prisma.accessToken.findUnique({ where: { jti } });
-        if (access && access.clientId === clientId && !access.revokedAt) {
-          await prisma.accessToken.update({
-            where: { jti },
-            data: { revokedAt: new Date() },
-          });
-        }
+      if (typeof payload.jti === "string") {
+        jti = payload.jti;
       }
     }
   } catch {
-    // Malformed token — ignore per RFC 7009 §2.2.
+    // Malformed token — per RFC 7009 §2.2, return 200 without leaking.
+    return new Response(null, { status: 200 });
+  }
+
+  if (jti) {
+    const access = await prisma.accessToken.findUnique({ where: { jti } });
+    if (access && access.clientId === clientId && !access.revokedAt) {
+      await prisma.accessToken.update({
+        where: { jti },
+        data: { revokedAt: new Date() },
+      });
+    }
   }
 
   return new Response(null, { status: 200 });
