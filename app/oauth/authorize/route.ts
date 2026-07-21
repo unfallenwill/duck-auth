@@ -22,6 +22,18 @@ const CODE_TTL_SECONDS = 60 * 10; // 10 minutes
  * Implements RFC 6749 §4.1.1 + RFC 7636 (PKCE S256).
  */
 export async function GET(req: Request) {
+  try {
+    return await handleAuthorize(req);
+  } catch (err) {
+    console.error("[oauth/authorize] unexpected error:", err);
+    return Response.json(
+      { error: "server_error", error_description: "An unexpected error occurred" },
+      { status: 500 },
+    );
+  }
+}
+
+async function handleAuthorize(req: Request) {
   const url = new URL(req.url);
   const params = url.searchParams;
 

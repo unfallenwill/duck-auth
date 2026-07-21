@@ -1,12 +1,12 @@
 /**
  * POST /api/test/rate-reset — resets the in-memory rate-limit buckets.
  *
- * **Guarded**: only responds when ALL of the following are true:
- *   1. `NODE_ENV !== "production"` — never available in production builds
- *   2. Request comes from localhost (127.0.0.1, ::1, or IPv4-mapped IPv6)
+ * **Guarded**: only responds when the request comes from localhost
+ * (127.0.0.1, ::1, or IPv4-mapped IPv6).
  *
- * In production this endpoint returns 404, giving no indication it exists.
- * For defense-in-depth, also block this path at the reverse-proxy layer.
+ * There is no NODE_ENV guard — the endpoint is available in all
+ * environments as long as the caller is localhost.  For production
+ * safety, block this path at the reverse-proxy layer.
  */
 import { NextResponse } from "next/server";
 import { _resetRateLimit } from "@/lib/oauth/rate-limit";
