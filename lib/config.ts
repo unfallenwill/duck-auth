@@ -52,6 +52,20 @@ const ConfigSchema = z.object({
    * accidentally enabled by a missing env var.
    */
   sessionLegacyGracePeriod: z.boolean().default(false),
+
+  /**
+   * Single-admin bearer token for `/admin/*` endpoints (issue #38 Phase 2).
+   * Header: `X-Admin-Token: $ADMIN_TOKEN`. Optional — when unset, admin
+   * endpoints return 503 (feature disabled, not 401 unauthenticated).
+   *
+   * This is the "Option A" auth scheme — single ops admin via env var. To
+   * migrate to multi-admin with roles, replace with a DB-backed scheme
+   * (Option B); the route handlers don't need to change, only the auth
+   * middleware in `lib/oauth/admin-auth.ts`.
+   *
+   * Recommended: 32+ random bytes from `openssl rand -base64 48`.
+   */
+  adminToken: z.string().min(32).optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -67,6 +81,7 @@ function loadConfig(): Config {
     demoRedirectUri: process.env["DEMO_REDIRECT_URI"],
     sessionLegacyGracePeriod:
       process.env["OAUTH_SESSION_LEGACY_GRACE"] === "true",
+    adminToken: process.env["ADMIN_TOKEN"],
   };
 
   const isProd = process.env["NODE_ENV"] === "production";
