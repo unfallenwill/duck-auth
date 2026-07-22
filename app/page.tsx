@@ -8,16 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-import { ISSUER } from "@/lib/oauth/discovery";
-
-async function fetchUserInfo(accessToken: string) {
-  const res = await fetch(`${ISSUER}/oauth/userinfo`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    cache: "no-store",
-  });
-  if (!res.ok) return null;
-  return (await res.json()) as Record<string, unknown>;
-}
+import { userinfo as fetchUserInfoClaims } from "@/lib/oauth-client";
 
 export default async function Home({
   searchParams,
@@ -27,7 +18,7 @@ export default async function Home({
   const sp = await searchParams;
   const cookieStore = await cookies();
   const accessToken = cookieStore.get("oauth_access_token")?.value;
-  const userinfo = accessToken ? await fetchUserInfo(accessToken) : null;
+  const userinfo = accessToken ? await fetchUserInfoClaims(accessToken) : null;
 
   return (
     <main className="flex min-h-svh items-center justify-center p-8">

@@ -1,7 +1,7 @@
-import { prisma } from "@/lib/generated/prisma-client";
 import { authenticateClient } from "@/lib/oauth/client-auth";
 import { readFormBody } from "@/lib/oauth/http";
 import { revokeRateLimit } from "@/lib/oauth/rate-limit";
+import { revokeToken } from "@/lib/oauth/token-service";
 
 /**
  * POST /oauth/revoke (RFC 7009).
@@ -10,10 +10,9 @@ import { revokeRateLimit } from "@/lib/oauth/rate-limit";
  * silently return 200 (per RFC 7009 §2.2 we never leak whether a token
  * existed).
  *
- * Either token type can be revoked. For refresh tokens (opaque strings),
- * we look them up directly. For access tokens (JWT), we decode without
- * verifying (the DB is the source of truth for revocation status — the
- * signature only proves the token was once valid).
+ * Either token type can be revoked. The revocation logic is shared with
+ * the in-process oauth-client wrapper (see lib/oauth-client.ts) — same
+ * CAS guards, same cross-client boundary.
  *
  * Per RFC 7009 §2.2 we always return 200, even for unknown tokens, to
  * avoid leaking information.
@@ -33,7 +32,6 @@ export async function POST(req: Request) {
   if (!auth) {
     return new Response(null, { status: 200 });
   }
-  const clientId = auth.clientId;
 
   const token = form.get("token");
   if (typeof token !== "string" || !token) {
@@ -43,44 +41,13 @@ export async function POST(req: Request) {
     );
   }
 
-  // Path 1: refresh token (opaque string, looked up directly). Must belong
-  // to the authenticated client.
-  const refresh = await prisma.refreshToken.findUnique({ where: { token } });
-  if (refresh && refresh.clientId === clientId && !refresh.revokedAt) {
-    await prisma.refreshToken.update({
-      where: { token },
-      data: { revokedAt: new Date() },
-    });
-  }
+  const hintRaw = form.get("token_type_hint");
+  const hint =
+    hintRaw === "access_token" || hintRaw === "refresh_token"
+      ? hintRaw
+      : undefined;
 
-  // Path 2: access token (JWT). Decode without verify, look up by jti.
-  // Only catch parse/decode errors (malformed token) — let DB errors
-  // propagate so they surface as 500s rather than silently failing.
-  let jti: string | undefined;
-  try {
-    const parts = token.split(".");
-    if (parts.length === 3) {
-      const payload = JSON.parse(
-        Buffer.from(parts[1]!, "base64url").toString("utf8"),
-      );
-      if (typeof payload.jti === "string") {
-        jti = payload.jti;
-      }
-    }
-  } catch {
-    // Malformed token — per RFC 7009 §2.2, return 200 without leaking.
-    return new Response(null, { status: 200 });
-  }
-
-  if (jti) {
-    const access = await prisma.accessToken.findUnique({ where: { jti } });
-    if (access && access.clientId === clientId && !access.revokedAt) {
-      await prisma.accessToken.update({
-        where: { jti },
-        data: { revokedAt: new Date() },
-      });
-    }
-  }
+  await revokeToken(token, hint, auth.clientId);
 
   return new Response(null, { status: 200 });
 }
