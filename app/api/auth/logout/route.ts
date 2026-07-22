@@ -2,15 +2,19 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/generated/prisma-client";
 import { extractSessionJti } from "@/lib/oauth/session";
-import { ISSUER } from "@/lib/oauth/discovery";
 import { config } from "@/lib/config";
+import { revoke } from "@/lib/oauth-client";
 
 /**
  * POST /api/auth/logout
- * Best-effort: revoke access + refresh tokens at /oauth/revoke, mark the
+ * Best-effort: revoke access + refresh tokens (in-process), mark the
  * server-side Session row as revoked, then clear all client-side cookies.
  * Even if the revoke calls fail, the local cookies are cleared so the user
  * is effectively logged out from this app.
+ *
+ * Issue #29: was two `fetch(${ISSUER}/oauth/revoke, ...)` calls — same
+ * process, extra HTTP roundtrip + ISSUER env coupling. Now uses the
+ * in-process `revoke` wrapper which mirrors the HTTP API surface.
  */
 export async function POST(req: Request) {
   const cookieStore = await cookies();
@@ -19,8 +23,6 @@ export async function POST(req: Request) {
   const sessionCookie = cookieStore.get("oauth_session")?.value;
 
   const clientId = config.demoClientId;
-  const clientSecret = config.demoClientSecret;
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
   // Mark the server-side Session row as revoked so the same cookie value
   // (e.g. captured before logout) cannot be used to authorize anymore.
@@ -45,27 +47,16 @@ export async function POST(req: Request) {
       });
   }
 
-  // Revoke both tokens (best-effort, ignore failures).
-  if (refresh) {
-    await fetch(`${ISSUER}/oauth/revoke`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${basic}`,
-      },
-      body: new URLSearchParams({ token: refresh, token_type_hint: "refresh_token" }),
-    }).catch(() => {});
-  }
-  if (access) {
-    await fetch(`${ISSUER}/oauth/revoke`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${basic}`,
-      },
-      body: new URLSearchParams({ token: access, token_type_hint: "access_token" }),
-    }).catch(() => {});
-  }
+  // Revoke both tokens (best-effort, ignore failures — same contract as
+  // the original fetch-based code).
+  await Promise.all([
+    refresh
+      ? revoke({ token: refresh, hint: "refresh_token", clientId })
+      : Promise.resolve(),
+    access
+      ? revoke({ token: access, hint: "access_token", clientId })
+      : Promise.resolve(),
+  ]);
 
   // Clear all oauth cookies (and the session cookie if present).
   for (const name of [

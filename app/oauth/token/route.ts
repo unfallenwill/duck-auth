@@ -4,7 +4,11 @@ import { verifyPkceS256 } from "@/lib/oauth/crypto";
 import { authenticateClient } from "@/lib/oauth/client-auth";
 import { readFormBody } from "@/lib/oauth/http";
 import { tokenRateLimit } from "@/lib/oauth/rate-limit";
-import { issueTokenSet } from "@/lib/oauth/token-service";
+import {
+  exchangeAuthorizationCode,
+  exchangeRefreshToken,
+  tokenSetResponse,
+} from "@/lib/oauth/token-service";
 
 export async function POST(req: Request) {
   const form = await readFormBody(req);
@@ -68,48 +72,19 @@ async function handleAuthorizationCode(
 
   const record = await prisma.authorizationCode.findUnique({ where: { code } });
   if (!record) throw new OAuthError("invalid_grant", "Unknown code");
-  if (record.expiresAt < new Date()) {
-    throw new OAuthError("invalid_grant", "Code expired");
-  }
-  if (record.clientId !== clientId) {
-    throw new OAuthError("invalid_grant", "Code was issued to a different client");
-  }
-  if (record.redirectUri !== redirectUri) {
-    throw new OAuthError(
-      "invalid_grant",
-      "redirect_uri does not match the one used in authorization",
-    );
-  }
 
-  if (record.codeChallenge) {
-    if (!codeVerifier) {
-      throw new OAuthError("invalid_request", "code_verifier is required (PKCE)");
-    }
-    if (record.codeChallengeMethod === "S256") {
-      if (!verifyPkceS256(codeVerifier, record.codeChallenge)) {
-        throw new OAuthError("invalid_grant", "PKCE verification failed");
-      }
-    }
-  }
-
-  // Atomic CAS + token issuance. If anything throws (CAS failure, DB
-  // constraint, prisma error), the whole transaction rolls back and the
-  // authorization code remains usable for a retry.
-  //
-  // `record` is captured by closure from the read above (outside the tx).
-  // The fields we use (`userId`, `scopes`) are immutable after creation
-  // per the Prisma schema, so the closure capture is safe — the only
-  // mutable field, `usedAt`, is protected by the CAS updateMany below.
-  return prisma.$transaction(async (tx) => {
-    const used = await tx.authorizationCode.updateMany({
-      where: { code, usedAt: null },
-      data: { usedAt: new Date() },
-    });
-    if (used.count === 0) {
-      throw new OAuthError("invalid_grant", "Code already used");
-    }
-    return await issueTokenSet(record.userId, clientId, record.scopes, tx);
+  // Delegate validation + atomic CAS + token issuance to the shared
+  // service helper (same code path used by the in-process oauth-client
+  // wrapper, see lib/oauth-client.ts).
+  const data = await exchangeAuthorizationCode({
+    code,
+    redirectUri,
+    codeVerifier,
+    clientId,
+    authorizationCode: record,
+    verifyPkceS256,
   });
+  return tokenSetResponse(data);
 }
 
 async function handleRefreshToken(
@@ -125,26 +100,11 @@ async function handleRefreshToken(
     where: { token: refresh },
   });
   if (!record) throw new OAuthError("invalid_grant", "Unknown refresh token");
-  if (record.expiresAt < new Date()) {
-    throw new OAuthError("invalid_grant", "Refresh token expired");
-  }
-  if (record.clientId !== clientId) {
-    throw new OAuthError("invalid_grant", "Token belongs to a different client");
-  }
 
-  // Atomic CAS + token issuance. On failure, the refresh token stays
-  // un-revoked and the client can retry.
-  return prisma.$transaction(async (tx) => {
-    const revoked = await tx.refreshToken.updateMany({
-      where: { token: refresh, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    if (revoked.count === 0) {
-      throw new OAuthError(
-        "invalid_grant",
-        "Refresh token revoked or already rotated",
-      );
-    }
-    return await issueTokenSet(record.userId, clientId, record.scopes, tx);
+  const data = await exchangeRefreshToken({
+    refreshToken: refresh,
+    clientId,
+    refreshTokenRecord: record,
   });
+  return tokenSetResponse(data);
 }

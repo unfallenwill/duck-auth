@@ -1,11 +1,14 @@
 import { cookies } from "next/headers";
-import { ISSUER } from "@/lib/oauth/discovery";
+import { userinfo } from "@/lib/oauth-client";
 
 /**
  * GET /api/auth/me
- * Uses the stored access_token to call /oauth/userinfo.
- * Returns 401 if no token; calls server-side so the token never leaves the
- * server boundary.
+ * Uses the stored access_token to fetch OIDC userinfo (in-process).
+ * Returns 401 if no token or token is invalid/expired/revoked.
+ *
+ * Issue #29: was `fetch(${ISSUER}/oauth/userinfo, ...)` — same process,
+ * extra HTTP roundtrip + ISSUER env coupling. Now uses the in-process
+ * `userinfo` wrapper which calls the service helper directly.
  */
 export async function GET() {
   const cookieStore = await cookies();
@@ -15,21 +18,10 @@ export async function GET() {
     return Response.json({ error: "not_authenticated" }, { status: 401 });
   }
 
-  const res = await fetch(`${ISSUER}/oauth/userinfo`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-
-  if (res.status === 401) {
+  const claims = await userinfo(token);
+  if (!claims) {
     return Response.json({ error: "token_invalid" }, { status: 401 });
   }
-  if (!res.ok) {
-    return Response.json(
-      { error: "userinfo_failed", status: res.status },
-      { status: 502 },
-    );
-  }
 
-  const userinfo = await res.json();
-  return Response.json(userinfo);
+  return Response.json(claims);
 }

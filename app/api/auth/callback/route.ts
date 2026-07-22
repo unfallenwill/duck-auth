@@ -1,13 +1,18 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { cookieDefaults } from "@/lib/oauth/cookies";
-import { ISSUER } from "@/lib/oauth/discovery";
 import { config } from "@/lib/config";
+import { exchangeCode } from "@/lib/oauth-client";
 
 /**
  * GET /api/auth/callback
  * Receives ?code=...&state=... from the OAuth server, validates state,
- * exchanges code for tokens at /oauth/token, stores tokens, redirects home.
+ * exchanges code for tokens (in-process), stores tokens, redirects home.
+ *
+ * Issue #29: was `fetch(${ISSUER}/oauth/token, ...)` — same process,
+ * extra HTTP roundtrip + ISSUER env coupling. Now uses the in-process
+ * `exchangeCode` wrapper which mirrors the HTTP API surface but calls
+ * the service helpers directly.
  */
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -41,49 +46,31 @@ export async function GET(req: Request) {
     );
   }
 
-  // Exchange code for tokens.
-  const clientId = config.demoClientId;
-  const clientSecret = config.demoClientSecret;
-  const redirectUri = config.demoRedirectUri;
-
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  const tokenRes = await fetch(`${ISSUER}/oauth/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${basic}`,
-    },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirectUri,
-      code_verifier: codeVerifier,
-    }),
-  });
-
-  // Clear one-time cookies regardless of outcome.
+  // Clear one-time cookies regardless of outcome (they're burned by use).
   cookieStore.delete("oauth_state");
   cookieStore.delete("oauth_verifier");
 
-  if (!tokenRes.ok) {
-    const err = await tokenRes.text();
+  // Exchange code for tokens (in-process). exchangeCode throws on
+  // invalid_grant / unknown code etc. — we surface those as redirects
+  // with an oauth_error query param so the home page can show the error.
+  let tokens;
+  try {
+    tokens = await exchangeCode({
+      code,
+      redirectUri: config.demoRedirectUri,
+      codeVerifier,
+      clientId: config.demoClientId,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
     return NextResponse.redirect(
       new URL(
-        `/?oauth_error=token_exchange_failed&detail=${encodeURIComponent(err)}`,
+        `/?oauth_error=token_exchange_failed&detail=${encodeURIComponent(detail)}`,
         req.url,
       ),
       302,
     );
   }
-
-  const tokens = (await tokenRes.json()) as {
-    access_token: string;
-    refresh_token: string;
-    expires_in: number;
-    id_token?: string;
-    token_type: string;
-    scope: string;
-  };
 
   // IMPORTANT: must use NextResponse.redirect() (not Response.redirect) so the
   // cookie() writes below are attached to the outgoing 302 response.
