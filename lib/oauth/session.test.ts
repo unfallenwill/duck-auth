@@ -2,12 +2,13 @@
  * Unit tests for lib/oauth/session.ts.
  *
  * Mocks prisma to exercise only the sign/verify orchestration logic,
- * including all revocation semantics introduced by issue #30 Phase 1.
+ * including all revocation semantics introduced by issue #30 Phase 1
+ * and the legacy JWT fallback from issue #37 Phase 5.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Hoisted mocks (vi.mock factories run before everything else) ──
-const { prismaMock } = vi.hoisted(() => {
+const { prismaMock, legacyGrace } = vi.hoisted(() => {
   return {
     prismaMock: {
       session: {
@@ -16,11 +17,29 @@ const { prismaMock } = vi.hoisted(() => {
         update: vi.fn(),
       },
     },
+    // Mutable bag so individual tests can flip the env-controlled flag.
+    // Mirrors config.sessionLegacyGracePeriod (issue #37 Phase 5).
+    legacyGrace: { current: false },
   };
 });
 
 vi.mock("@/lib/config", () => ({
-  config: { sessionSecret: "test-secret-32-bytes-please-please!!" },
+  // Proxy so reads happen at call-time, matching the real config getter
+  // (which also re-reads on every access — see lib/config.ts).
+  config: new Proxy(
+    {},
+    {
+      get(_target, prop: string) {
+        if (prop === "sessionSecret") {
+          return "test-secret-32-bytes-please-please!!";
+        }
+        if (prop === "sessionLegacyGracePeriod") {
+          return legacyGrace.current;
+        }
+        return undefined;
+      },
+    },
+  ),
   SESSION_COOKIE_DEV_FALLBACK: "test-secret-32-bytes-please-please!!",
 }));
 
@@ -38,6 +57,8 @@ import { SignJWT } from "jose";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Reset legacy fallback flag to default (off) before each test.
+  legacyGrace.current = false;
   // Default mock impl: store created rows so verify can find them later.
   const store = new Map<string, {
     jti: string;
@@ -151,7 +172,7 @@ describe("verifySessionCookie — JWT-level rejections", () => {
     expect(await verifySessionCookie(token)).toBeNull();
   });
 
-  it("returns null for JWT without jti claim", async () => {
+  it("returns null for JWT without jti claim (legacy fallback off by default)", async () => {
     const secret = new TextEncoder().encode("test-secret-32-bytes-please-please!!");
     const token = await new SignJWT({ uid: "u1" })
       .setProtectedHeader({ alg: "HS256", typ: "session" })
@@ -322,5 +343,106 @@ describe("extractSessionJti — signature-only, no DB lookup", () => {
       .setExpirationTime(Math.floor(Date.now() / 1000) - 60)
       .sign(secret);
     expect(await extractSessionJti(token)).toBeNull();
+  });
+});
+
+describe("verifySessionCookie — legacy fallback (issue #37 Phase 5)", () => {
+  const legacySecret = new TextEncoder().encode(
+    "test-secret-32-bytes-please-please!!",
+  );
+
+  // Sign a JWT in the pre-Phase-1 format: just { uid }, no jti.
+  async function signLegacyCookie(uid: string): Promise<string> {
+    return await new SignJWT({ uid })
+      .setProtectedHeader({ alg: "HS256", typ: "session" })
+      .setIssuedAt()
+      .setExpirationTime("1h")
+      .sign(legacySecret);
+  }
+
+  it("accepts a legacy JWT (no jti) when sessionLegacyGracePeriod is true", async () => {
+    legacyGrace.current = true;
+    const token = await signLegacyCookie("legacy-user");
+    const result = await verifySessionCookie(token);
+    expect(result).toEqual({ uid: "legacy-user" });
+  });
+
+  it("rejects a legacy JWT (no jti) when sessionLegacyGracePeriod is false", async () => {
+    legacyGrace.current = false;
+    const token = await signLegacyCookie("legacy-user");
+    expect(await verifySessionCookie(token)).toBeNull();
+  });
+
+  it("legacy fallback rejects when JWT is signed with the wrong secret", async () => {
+    legacyGrace.current = true;
+    const wrongSecret = new TextEncoder().encode(
+      "wrong-secret-32-bytes-here-here!!",
+    );
+    const token = await new SignJWT({ uid: "evil" })
+      .setProtectedHeader({ alg: "HS256", typ: "session" })
+      .setIssuedAt()
+      .setExpirationTime("1h")
+      .sign(wrongSecret);
+    expect(await verifySessionCookie(token)).toBeNull();
+  });
+
+  it("legacy fallback rejects when exp has passed (jose enforces inside jwtVerify)", async () => {
+    legacyGrace.current = true;
+    const token = await new SignJWT({ uid: "u1" })
+      .setProtectedHeader({ alg: "HS256", typ: "session" })
+      .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 60)
+      .sign(legacySecret);
+    expect(await verifySessionCookie(token)).toBeNull();
+  });
+
+  it("legacy fallback rejects when uid claim is missing entirely", async () => {
+    legacyGrace.current = true;
+    const token = await new SignJWT({ foo: "bar" })
+      .setProtectedHeader({ alg: "HS256", typ: "session" })
+      .setIssuedAt()
+      .setExpirationTime("1h")
+      .sign(legacySecret);
+    expect(await verifySessionCookie(token)).toBeNull();
+  });
+
+  it("legacy fallback does NOT consult the Session table (signature-only)", async () => {
+    legacyGrace.current = true;
+    const token = await signLegacyCookie("legacy-user");
+    const result = await verifySessionCookie(token);
+    expect(result).toEqual({ uid: "legacy-user" });
+    expect(prismaMock.session.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("new-format path wins over legacy fallback when jti is present (Tier 1 → DB)", async () => {
+    // Even with legacy enabled, a token with jti goes through Tier 1.
+    // No DB row exists → must reject (proves Tier 2 didn't catch it).
+    legacyGrace.current = true;
+    const token = await new SignJWT({ uid: "u1", jti: "no-such-jti" })
+      .setProtectedHeader({ alg: "HS256", typ: "session" })
+      .setIssuedAt()
+      .setExpirationTime("1h")
+      .sign(legacySecret);
+    expect(await verifySessionCookie(token)).toBeNull();
+    // And we DID try the DB — distinguishing from "fell through to Tier 2".
+    expect(prismaMock.session.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { jti: "no-such-jti" } }),
+    );
+  });
+
+  it("reads sessionLegacyGracePeriod from config per-call (not cached)", async () => {
+    // Simulate operator toggling the env var mid-process. The Proxy
+    // mock returns the current value of legacyGrace.current on every
+    // read, matching the real config getter's behavior.
+    const token = await signLegacyCookie("legacy-user");
+
+    legacyGrace.current = false;
+    expect(await verifySessionCookie(token)).toBeNull();
+
+    legacyGrace.current = true;
+    expect(await verifySessionCookie(token)).toEqual({ uid: "legacy-user" });
+
+    legacyGrace.current = false;
+    expect(await verifySessionCookie(token)).toBeNull();
   });
 });
