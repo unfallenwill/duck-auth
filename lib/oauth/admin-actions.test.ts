@@ -29,6 +29,7 @@ vi.mock("@/lib/generated/prisma-client", () => ({
 import {
   revokeAllSessionsForUser,
   revokeAllTokensForUser,
+  revokeSessionByJti,
   listActiveSessionsForUser,
 } from "@/lib/oauth/admin-actions";
 
@@ -157,5 +158,44 @@ describe("listActiveSessionsForUser", () => {
     prismaMock.session.findMany.mockResolvedValueOnce([]);
     const result = await listActiveSessionsForUser("user-1");
     expect(result).toEqual([]);
+  });
+});
+
+describe("revokeSessionByJti", () => {
+  it("uses updateMany with jti + userId + revokedAt guard", async () => {
+    prismaMock.session.updateMany.mockResolvedValueOnce({ count: 1 });
+    const result = await revokeSessionByJti("user-1", "jti-abc");
+    expect(prismaMock.session.updateMany).toHaveBeenCalledWith({
+      where: { jti: "jti-abc", userId: "user-1", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(result).toEqual({ revoked: true });
+  });
+
+  it("returns revoked: true when count === 1", async () => {
+    prismaMock.session.updateMany.mockResolvedValueOnce({ count: 1 });
+    const result = await revokeSessionByJti("user-1", "jti-abc");
+    expect(result.revoked).toBe(true);
+  });
+
+  it("returns revoked: false when no row matches (jti doesn't exist)", async () => {
+    prismaMock.session.updateMany.mockResolvedValueOnce({ count: 0 });
+    const result = await revokeSessionByJti("user-1", "no-such-jti");
+    expect(result).toEqual({ revoked: false });
+  });
+
+  it("returns revoked: false when jti exists but belongs to a different user (no info leak)", async () => {
+    // The userId guard makes the count 0 — caller can't distinguish
+    // 'jti doesn't exist' from 'jti belongs to another user'.
+    prismaMock.session.updateMany.mockResolvedValueOnce({ count: 0 });
+    const result = await revokeSessionByJti("alice", "bobs-jti");
+    expect(result).toEqual({ revoked: false });
+  });
+
+  it("returns revoked: false when session was already revoked", async () => {
+    // revokedAt: null guard means already-revoked sessions don't match.
+    prismaMock.session.updateMany.mockResolvedValueOnce({ count: 0 });
+    const result = await revokeSessionByJti("user-1", "already-revoked");
+    expect(result).toEqual({ revoked: false });
   });
 });

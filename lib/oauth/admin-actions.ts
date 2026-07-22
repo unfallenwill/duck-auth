@@ -1,17 +1,21 @@
 /**
- * Admin-side mutation and query helpers for session / token revocation.
+ * Session / token revocation helpers.
  *
- * These are the core logic behind the `/admin/users/:userId/...` routes
- * (issue #38, Phase 2 of #30). They are intentionally framework-agnostic:
- * no Request/Response handling, no auth checks, no audit logging. The
- * route handlers wire those layers on top.
+ * Shared between:
+ *   - `/admin/users/:userId/...` routes (issue #38, Phase 2 of #30) — admin
+ *     kicks another user's sessions/tokens via the `ADMIN_TOKEN` auth scheme.
+ *   - `/api/me/sessions/...` routes (issue #34, Phase 3 of #30) — user
+ *     manages their own sessions via the session-cookie auth scheme.
+ *
+ * The helpers themselves are framework-agnostic: no Request/Response
+ * handling, no auth checks, no audit logging. Route handlers wire those
+ * layers on top.
  *
  * Atomicity note: every mutation uses `updateMany` with a `revokedAt: null`
- * guard so concurrent admin invocations don't double-write and a session
- * that races with the call still gets revoked (matches the CAS pattern in
+ * guard so concurrent calls don't double-write and a session that races
+ * with the call still gets revoked (matches the CAS pattern in
  * MEMORY.md / `lib/oauth/token-service.ts`).
  */
-
 import { prisma } from "@/lib/generated/prisma-client";
 
 export interface RevokeAllSessionsResult {
@@ -49,6 +53,29 @@ export async function revokeAllSessionsForUser(
     data: { revokedAt: new Date() },
   });
   return { count: result.count };
+}
+
+/**
+ * Revoke a single session by jti, scoped to the given userId.
+ *
+ * Returns `revoked: true` if the session existed, belonged to the user,
+ * and was non-revoked. Returns `false` if any of those conditions fail
+ * — which is indistinguishable to the caller (and intentional: don't
+ * leak whether a jti exists under a different user).
+ *
+ * Atomic CAS: the `userId` and `revokedAt: null` guards make this safe
+ * against races where another request revokes the same session
+ * concurrently.
+ */
+export async function revokeSessionByJti(
+  userId: string,
+  jti: string,
+): Promise<{ revoked: boolean }> {
+  const result = await prisma.session.updateMany({
+    where: { jti, userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  return { revoked: result.count === 1 };
 }
 
 /**
