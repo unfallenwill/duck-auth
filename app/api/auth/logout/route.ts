@@ -24,11 +24,12 @@ export async function POST(req: Request) {
 
   // Mark the server-side Session row as revoked so the same cookie value
   // (e.g. captured before logout) cannot be used to authorize anymore.
-  // Best-effort: if jti extraction fails (e.g. expired cookie) we still
-  // clear the local cookies. DB failures are logged (not silently dropped)
-  // so monitoring can alert — a swallowed revoke leaves the user's
-  // session active in the DB until expiresAt (default 2h), so the failure
-  // mode is observable.
+  // Best-effort: if jti extraction fails (e.g. expired cookie, OR a legacy
+  // pre-Phase-1 cookie with no jti claim — see issue #37 Phase 5) we still
+  // clear the local cookies below. DB failures are logged (not silently
+  // dropped) so monitoring can alert — a swallowed revoke leaves the
+  // user's session active in the DB until expiresAt (default 2h), so the
+  // failure mode is observable.
   const jti = await extractSessionJti(sessionCookie ?? "");
   if (jti) {
     await prisma.session
