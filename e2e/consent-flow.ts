@@ -16,8 +16,7 @@
 import { PrismaClient } from "../lib/generated/prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 import { recordConsent } from "../lib/oauth/consent";
-import { SignJWT } from "jose";
-import { SESSION_COOKIE_DEV_FALLBACK } from "../lib/config";
+import { createSessionCookie } from "./lib/session-cookie";
 
 const url = process.env["DATABASE_URL"] ?? "file:./dev.db";
 const adapter = new PrismaLibSql({ url });
@@ -49,17 +48,7 @@ async function getAliceId(): Promise<string> {
   return u.id;
 }
 
-async function createSessionCookie(userId: string): Promise<string> {
-  const secret = new TextEncoder().encode(
-    process.env["OAUTH_SESSION_SECRET"] ?? SESSION_COOKIE_DEV_FALLBACK,
-  );
-  const now = Math.floor(Date.now() / 1000);
-  return await new SignJWT({ uid: userId })
-    .setProtectedHeader({ alg: "HS256", typ: "session" })
-    .setIssuedAt(now)
-    .setExpirationTime(now + 60 * 60)
-    .sign(secret);
-}
+
 
 function buildAuthorizeUrl(): string {
   const params = new URLSearchParams({
