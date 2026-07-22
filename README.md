@@ -103,16 +103,20 @@ vitest.config.ts
 2. Set `OAUTH_SESSION_SECRET` to a random 48+ byte string
 3. Run `npm run db:keys:init` to generate persistent RSA keys
 4. Set up cron: `npm run db:cleanup` daily to purge expired tokens
-5. Block `/api/test/rate-reset` at the reverse proxy
+5. **Set `ADMIN_TOKEN`** to a random 32+ byte string. Required for `/admin/*` (Phase 2)
+   and `/api/test/rate-reset` (issue #32 hardened). Without it, those endpoints return 503.
 6. **Reverse proxy REQUIRED** — The rate limiter identifies clients via the
    `X-Forwarded-For` header. In a direct deployment (no proxy), attackers can
    forge this header to bypass all rate limits. Always deploy behind a trusted
    reverse proxy (nginx, Caddy, Cloudflare, etc.) and ensure it **overwrites**
    (not appends to) the `X-Forwarded-For` header from downstream clients.
+   Also block `/api/test/rate-reset` at the reverse proxy as belt-and-suspenders
+   (the app layer also returns 404 in production, but defense-in-depth).
 
    **nginx example:**
    ```nginx
    proxy_set_header X-Forwarded-For $remote_addr;
+   location /api/test/ { deny all; }
    ```
 
    **Caddy example:**

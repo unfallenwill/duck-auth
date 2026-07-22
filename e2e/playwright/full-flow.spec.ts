@@ -53,7 +53,12 @@ test.beforeAll(async () => {
 test.beforeEach(async ({ page }) => {
   await deleteConsent();
   // Reset rate-limit buckets so each test gets a fresh quota.
-  await page.request.post("http://localhost:3000/api/test/rate-reset");
+  // Endpoint requires ADMIN_TOKEN (issue #32) — read from env set in
+  // playwright.config.ts (webServer.env).
+  const adminToken = process.env["ADMIN_TOKEN"];
+  await page.request.post("http://localhost:3000/api/test/rate-reset", {
+    headers: adminToken ? { "X-Admin-Token": adminToken } : {},
+  });
 });
 
 test.afterAll(async () => {
