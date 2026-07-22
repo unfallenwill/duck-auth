@@ -78,11 +78,22 @@ export async function signSessionCookie(
 /**
  * Verify a session cookie. Returns `{ uid }` on success, `null` if any of:
  *   - signature verification failed (token tampered or signed with wrong key)
- *   - missing `uid` or `jti` claim
- *   - no Session row with that `jti` (never existed, or already cleaned up)
- *   - Session row exists but `expiresAt < now`
- *   - Session row exists but `revokedAt !== null`
- *   - Session row exists but `userId !== uid` from the JWT (tampering defense)
+ *   - missing `uid` claim (applies to both tiers)
+ *   - missing `jti` claim AND legacy fallback is disabled
+ *   - Tier 1 (new format) rejections:
+ *       - no Session row with that `jti` (never existed, or already cleaned up)
+ *       - Session row exists but `expiresAt < now`
+ *       - Session row exists but `revokedAt !== null`
+ *       - Session row exists but `userId !== uid` from the JWT (tampering defense)
+ *
+ * Two-tier dispatch (issue #37, Phase 5):
+ *   - Tier 1 (new format): JWT carries `jti` → DB lookup is authoritative
+ *   - Tier 2 (legacy fallback): JWT lacks `jti` AND `config.sessionLegacyGracePeriod`
+ *     is true → signature-only verification, no DB, not revocable. Bounded by
+ *     the JWT's own `exp` claim (jose enforces it inside `jwtVerify`).
+ *
+ * One `jwtVerify` call is shared between both tiers — jose doesn't require
+ * `jti` to be present, so the branch happens on payload shape AFTER verify.
  */
 export async function verifySessionCookie(
   value: string,
@@ -99,18 +110,29 @@ export async function verifySessionCookie(
   }
 
   const { uid, jti } = payload;
-  if (typeof uid !== "string" || typeof jti !== "string") return null;
+  if (typeof uid !== "string") return null;
 
-  const row = await prisma.session.findUnique({
-    where: { jti },
-    select: { userId: true, expiresAt: true, revokedAt: true },
-  });
-  if (!row) return null;
-  if (row.expiresAt < new Date()) return null;
-  if (row.revokedAt !== null) return null;
-  if (row.userId !== uid) return null;
+  // Tier 1: new format — DB-backed, revocable.
+  if (typeof jti === "string") {
+    const row = await prisma.session.findUnique({
+      where: { jti },
+      select: { userId: true, expiresAt: true, revokedAt: true },
+    });
+    if (!row) return null;
+    if (row.expiresAt < new Date()) return null;
+    if (row.revokedAt !== null) return null;
+    if (row.userId !== uid) return null;
+    return { uid };
+  }
 
-  return { uid };
+  // Tier 2: legacy fallback — signature-only, no DB lookup.
+  // Read config per-call (NOT cached) — `config` is a Proxy getter and an
+  // operator may toggle OAUTH_SESSION_LEGACY_GRACE at runtime.
+  if (config.sessionLegacyGracePeriod) {
+    return { uid };
+  }
+
+  return null;
 }
 
 /**
@@ -121,6 +143,13 @@ export async function verifySessionCookie(
  * Performs signature verification so a tampered cookie cannot trigger a
  * revocation against an arbitrary jti, but does NOT consult the Session
  * table — so a revoked/expired cookie still yields its original jti here.
+ *
+ * **Legacy cookies (issue #37 Phase 5)** have no `jti` claim and no
+ * Session row, so this returns `null` for them. That is correct behavior:
+ * logout's DB update is a no-op for legacy cookies, but
+ * `cookieStore.delete` in `app/api/auth/logout/route.ts` still clears
+ * client-side state. No parallel legacy fallback is needed here — the
+ * logout route already handles a `null` jti gracefully.
  *
  * Returns `null` if the cookie is malformed, has no jti, or signature
  * verification fails.

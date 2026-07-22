@@ -32,6 +32,26 @@ const ConfigSchema = z.object({
   demoRedirectUri: z
     .string()
     .default("http://localhost:3000/api/auth/callback"),
+
+  /**
+   * Opt-in legacy JWT session cookie fallback for the Phase 1 → Phase 5
+   * production migration window. See issue #37.
+   *
+   * When `true`, `verifySessionCookie` accepts JWTs signed with
+   * `OAUTH_SESSION_SECRET` that lack a `jti` claim (the pre-Phase-1 cookie
+   * format). The fallback is signature-only — no DB lookup, no revocation
+   * possible for these cookies — but they naturally expire within their
+   * own 2h TTL (jose enforces `exp` inside `jwtVerify`).
+   *
+   * Operators set `OAUTH_SESSION_LEGACY_GRACE=true` during the migration
+   * window (so existing users aren't logged out), then unset it after all
+   * legacy cookies have expired. Eventually the fallback code itself
+   * should be deleted (Phase 6 / cleanup).
+   *
+   * Must default to `false` — the legacy code path should be opt-in, not
+   * accidentally enabled by a missing env var.
+   */
+  sessionLegacyGracePeriod: z.boolean().default(false),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -45,6 +65,8 @@ function loadConfig(): Config {
     demoClientId: process.env["DEMO_CLIENT_ID"],
     demoClientSecret: process.env["DEMO_CLIENT_SECRET"],
     demoRedirectUri: process.env["DEMO_REDIRECT_URI"],
+    sessionLegacyGracePeriod:
+      process.env["OAUTH_SESSION_LEGACY_GRACE"] === "true",
   };
 
   const isProd = process.env["NODE_ENV"] === "production";
