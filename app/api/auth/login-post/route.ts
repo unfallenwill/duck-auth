@@ -61,7 +61,10 @@ export async function POST(req: Request) {
     );
   }
 
-  const { value, expiresAt } = await signSessionCookie(user.id);
+  const { value, expiresAt } = await signSessionCookie(user.id, {
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? undefined,
+  });
 
   // Issue the session cookie via the response (not via cookies() helper)
   // so Set-Cookie is guaranteed to ride the 303 redirect.

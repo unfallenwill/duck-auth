@@ -3,7 +3,7 @@
  * like a real browser. Checks that Set-Cookie headers actually arrive on
  * each response (the bug was cookies being lost on Response.redirect).
  */
-import { SignJWT } from "jose";
+import { createSessionCookie } from "./lib/session-cookie";
 
 const BASE = "http://localhost:3000";
 
@@ -46,16 +46,8 @@ async function main() {
   const jar = new Jar();
 
   // ----- Inject session cookie directly (same way e2e/flow.ts does) -----
-  const sessionSecret = new TextEncoder().encode(
-    process.env["OAUTH_SESSION_SECRET"] ??
-      "dev-only-change-me-32-bytes-please-please",
-  );
   const userId = process.argv[2] ?? "cmruhiqi30000xctf72q918j1";
-  const sessionJwt = await new SignJWT({ uid: userId })
-    .setProtectedHeader({ alg: "HS256", typ: "session" })
-    .setIssuedAt(Math.floor(Date.now() / 1000))
-    .setExpirationTime(Math.floor(Date.now() / 1000) + 3600)
-    .sign(sessionSecret);
+  const sessionJwt = await createSessionCookie(userId);
   jar.store.set("oauth_session", sessionJwt);
   console.log(`✓ injected session cookie (uid=${userId})`);
 

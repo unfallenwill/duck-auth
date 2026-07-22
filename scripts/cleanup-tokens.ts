@@ -19,7 +19,7 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   const now = new Date();
 
-  const [codes, access, refresh] = await Promise.all([
+  const [codes, access, refresh, sessions] = await Promise.all([
     prisma.authorizationCode.deleteMany({
       where: { expiresAt: { lt: now } },
     }),
@@ -29,12 +29,16 @@ async function main() {
     prisma.refreshToken.deleteMany({
       where: { expiresAt: { lt: now } },
     }),
+    prisma.session.deleteMany({
+      where: { expiresAt: { lt: now } },
+    }),
   ]);
 
   console.log(`[${now.toISOString()}] cleanup:`);
   console.log(`  authorization codes deleted: ${codes.count}`);
   console.log(`  access tokens deleted:       ${access.count}`);
   console.log(`  refresh tokens deleted:      ${refresh.count}`);
+  console.log(`  sessions deleted:            ${sessions.count}`);
 
   await prisma.$disconnect();
 }

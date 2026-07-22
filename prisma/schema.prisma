@@ -19,6 +19,22 @@ model User {
   authCodes     AuthorizationCode[]
   accessTokens  AccessToken[]
   refreshTokens RefreshToken[]
+  sessions      Session[]
+}
+
+model Session {
+  jti        String    @id  // UUID; matches the JWT's `jti` claim for DB lookup
+  userId     String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  userAgent  String?
+  ipAddress  String?
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])  // for cleanup sweep
 }
 
 model Client {

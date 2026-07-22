@@ -4,9 +4,9 @@
  */
 import { PrismaClient } from "../lib/generated/prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
-import { SignJWT, decodeJwt, decodeProtectedHeader } from "jose";
+import { decodeJwt, decodeProtectedHeader } from "jose";
 import { createHash, randomBytes } from "node:crypto";
-import { SESSION_COOKIE_DEV_FALLBACK } from "../lib/config";
+import { createSessionCookie } from "./lib/session-cookie";
 
 const BASE = "http://localhost:3000";
 const url = process.env["DATABASE_URL"] ?? "file:./dev.db";
@@ -17,15 +17,7 @@ async function main() {
     where: { email: "alice@example.com" },
   });
   if (!alice) throw new Error("seed missing");
-  const secret = new TextEncoder().encode(
-    process.env["OAUTH_SESSION_SECRET"] ?? SESSION_COOKIE_DEV_FALLBACK,
-  );
-  const now = Math.floor(Date.now() / 1000);
-  const sess = await new SignJWT({ uid: alice.id })
-    .setProtectedHeader({ alg: "HS256", typ: "session" })
-    .setIssuedAt(now)
-    .setExpirationTime(now + 3600)
-    .sign(secret);
+  const sess = await createSessionCookie(alice.id);
 
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
