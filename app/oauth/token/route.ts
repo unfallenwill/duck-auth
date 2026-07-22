@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/generated/prisma-client";
-import { tokenError } from "@/lib/oauth/errors";
+import { OAuthError, tokenError } from "@/lib/oauth/errors";
 import { verifyPkceS256 } from "@/lib/oauth/crypto";
 import { authenticateClient } from "@/lib/oauth/client-auth";
 import { readFormBody } from "@/lib/oauth/http";
@@ -35,14 +35,22 @@ export async function POST(req: Request) {
 
   const grantType = form.get("grant_type");
 
-  if (grantType === "authorization_code") {
-    return handleAuthorizationCode(auth.clientId, form);
+  try {
+    if (grantType === "authorization_code") {
+      return await handleAuthorizationCode(auth.clientId, form);
+    }
+    if (grantType === "refresh_token") {
+      return await handleRefreshToken(auth.clientId, form);
+    }
+    throw new OAuthError("unsupported_grant_type");
+  } catch (err) {
+    // OAuthError is the throwable form of a token endpoint error.
+    // Anything else is a real server error and propagates to Next.js.
+    if (err instanceof OAuthError) {
+      return tokenError(err.code, err.message, err.status);
+    }
+    throw err;
   }
-  if (grantType === "refresh_token") {
-    return handleRefreshToken(auth.clientId, form);
-  }
-
-  return tokenError("unsupported_grant_type");
 }
 
 async function handleAuthorizationCode(
@@ -53,21 +61,21 @@ async function handleAuthorizationCode(
   const redirectUri = form.get("redirect_uri");
   const codeVerifier = form.get("code_verifier");
 
-  if (!code) return tokenError("invalid_request", "code is required");
+  if (!code) throw new OAuthError("invalid_request", "code is required");
   if (!redirectUri) {
-    return tokenError("invalid_request", "redirect_uri is required");
+    throw new OAuthError("invalid_request", "redirect_uri is required");
   }
 
   const record = await prisma.authorizationCode.findUnique({ where: { code } });
-  if (!record) return tokenError("invalid_grant", "Unknown code");
+  if (!record) throw new OAuthError("invalid_grant", "Unknown code");
   if (record.expiresAt < new Date()) {
-    return tokenError("invalid_grant", "Code expired");
+    throw new OAuthError("invalid_grant", "Code expired");
   }
   if (record.clientId !== clientId) {
-    return tokenError("invalid_grant", "Code was issued to a different client");
+    throw new OAuthError("invalid_grant", "Code was issued to a different client");
   }
   if (record.redirectUri !== redirectUri) {
-    return tokenError(
+    throw new OAuthError(
       "invalid_grant",
       "redirect_uri does not match the one used in authorization",
     );
@@ -75,25 +83,33 @@ async function handleAuthorizationCode(
 
   if (record.codeChallenge) {
     if (!codeVerifier) {
-      return tokenError("invalid_request", "code_verifier is required (PKCE)");
+      throw new OAuthError("invalid_request", "code_verifier is required (PKCE)");
     }
     if (record.codeChallengeMethod === "S256") {
       if (!verifyPkceS256(codeVerifier, record.codeChallenge)) {
-        return tokenError("invalid_grant", "PKCE verification failed");
+        throw new OAuthError("invalid_grant", "PKCE verification failed");
       }
     }
   }
 
-  // CAS: only the first concurrent request succeeds.
-  const used = await prisma.authorizationCode.updateMany({
-    where: { code, usedAt: null },
-    data: { usedAt: new Date() },
+  // Atomic CAS + token issuance. If anything throws (CAS failure, DB
+  // constraint, prisma error), the whole transaction rolls back and the
+  // authorization code remains usable for a retry.
+  //
+  // `record` is captured by closure from the read above (outside the tx).
+  // The fields we use (`userId`, `scopes`) are immutable after creation
+  // per the Prisma schema, so the closure capture is safe — the only
+  // mutable field, `usedAt`, is protected by the CAS updateMany below.
+  return prisma.$transaction(async (tx) => {
+    const used = await tx.authorizationCode.updateMany({
+      where: { code, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (used.count === 0) {
+      throw new OAuthError("invalid_grant", "Code already used");
+    }
+    return await issueTokenSet(record.userId, clientId, record.scopes, tx);
   });
-  if (used.count === 0) {
-    return tokenError("invalid_grant", "Code already used");
-  }
-
-  return issueTokenSet(record.userId, clientId, record.scopes);
 }
 
 async function handleRefreshToken(
@@ -102,28 +118,33 @@ async function handleRefreshToken(
 ) {
   const refresh = form.get("refresh_token");
   if (!refresh) {
-    return tokenError("invalid_request", "refresh_token is required");
+    throw new OAuthError("invalid_request", "refresh_token is required");
   }
 
   const record = await prisma.refreshToken.findUnique({
     where: { token: refresh },
   });
-  if (!record) return tokenError("invalid_grant", "Unknown refresh token");
+  if (!record) throw new OAuthError("invalid_grant", "Unknown refresh token");
   if (record.expiresAt < new Date()) {
-    return tokenError("invalid_grant", "Refresh token expired");
+    throw new OAuthError("invalid_grant", "Refresh token expired");
   }
   if (record.clientId !== clientId) {
-    return tokenError("invalid_grant", "Token belongs to a different client");
+    throw new OAuthError("invalid_grant", "Token belongs to a different client");
   }
 
-  // CAS: only the first concurrent rotation succeeds.
-  const revoked = await prisma.refreshToken.updateMany({
-    where: { token: refresh, revokedAt: null },
-    data: { revokedAt: new Date() },
+  // Atomic CAS + token issuance. On failure, the refresh token stays
+  // un-revoked and the client can retry.
+  return prisma.$transaction(async (tx) => {
+    const revoked = await tx.refreshToken.updateMany({
+      where: { token: refresh, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (revoked.count === 0) {
+      throw new OAuthError(
+        "invalid_grant",
+        "Refresh token revoked or already rotated",
+      );
+    }
+    return await issueTokenSet(record.userId, clientId, record.scopes, tx);
   });
-  if (revoked.count === 0) {
-    return tokenError("invalid_grant", "Refresh token revoked or already rotated");
-  }
-
-  return issueTokenSet(record.userId, clientId, record.scopes);
 }

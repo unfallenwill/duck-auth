@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/generated/prisma-client";
-import { tokenError } from "@/lib/oauth/errors";
+import { Prisma } from "@/lib/generated/prisma/client";
+import { OAuthError } from "@/lib/oauth/errors";
 import { randomToken } from "@/lib/oauth/crypto";
 import { signAccessToken, signIdToken } from "@/lib/oauth/jwt";
 import { tokenResponse } from "@/lib/oauth/http";
@@ -11,14 +12,31 @@ const ID_TOKEN_TTL = 60 * 60; // 1h
 /**
  * Shared token issuance: sign access + refresh (+ optional id token),
  * persist to DB, build the response. Used by all grant types.
+ *
+ * ATOMICITY: `tx` is REQUIRED. The caller MUST open a
+ * `prisma.$transaction(async (tx) => {...})` and pass the tx client here.
+ * This guarantees the token writes are atomic with any CAS-protected
+ * resource consumption (e.g. authorizationCode.usedAt, refreshToken.revokedAt)
+ * happening in the caller — the same shape of bug as issue #28.
+ *
+ * ERRORS: Throws `OAuthError` for expected failure modes (e.g. user record
+ * missing). This is critical inside a transaction: returning a Response
+ * would let the tx commit, leaving the caller-side CAS write permanently
+ * applied. By throwing, the transaction rolls back and the caller-side CAS
+ * is undone.
  */
 export async function issueTokenSet(
   userId: string,
   clientId: string,
   scopes: string,
+  tx: Prisma.TransactionClient,
 ): Promise<Response> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) return tokenError("server_error", "User record missing", 500);
+  const db = tx;
+
+  const user = await db.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    throw new OAuthError("server_error", "User record missing");
+  }
 
   const access = await signAccessToken({
     sub: user.id,
@@ -26,7 +44,7 @@ export async function issueTokenSet(
     scopes,
     ttlSeconds: ACCESS_TOKEN_TTL,
   });
-  await prisma.accessToken.create({
+  await db.accessToken.create({
     data: {
       jti: access.jti,
       clientId,
@@ -37,7 +55,7 @@ export async function issueTokenSet(
   });
 
   const refreshToken = randomToken(48);
-  await prisma.refreshToken.create({
+  await db.refreshToken.create({
     data: {
       token: refreshToken,
       clientId,
