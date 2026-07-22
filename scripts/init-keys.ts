@@ -1,11 +1,15 @@
 /**
- * Generate and persist the RS256 key pair used by /oauth/token and /oauth/jwks.
+ * Generate and persist the RS256 key set used by /oauth/token and /oauth/jwks.
+ *
+ * Multi-key support (issue #31): writes the new shape
+ *   { primary: { kid, publicKey, privateKey, createdAt }, retired: [] }
+ * with an auto-generated kid (no more hardcoded "key-1").
  *
  * Idempotent: refuses to overwrite an existing keys file unless --force is given.
  *
  * Usage:
  *   npm run db:keys:init
- *   npm run db:keys:init -- --force   # overwrite existing keys
+ *   npm run db:keys:init -- --force   # overwrite existing keys (invalidates ALL issued tokens)
  */
 import "dotenv/config";
 import { generateKeyPairSync } from "node:crypto";
@@ -13,9 +17,9 @@ import { existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { config } from "../lib/config";
+import { generateKid } from "../lib/oauth/keys";
 
 const KEYS_PATH = config.keysPath;
-const KID = "key-1";
 const force = process.argv.includes("--force");
 
 if (!force && existsSync(KEYS_PATH)) {
@@ -30,15 +34,16 @@ const { publicKey, privateKey } = generateKeyPairSync("rsa", {
   privateKeyEncoding: { type: "pkcs8", format: "pem" },
 });
 
+const kid = generateKid();
+const createdAt = new Date().toISOString();
+
 mkdirSync(dirname(KEYS_PATH), { recursive: true });
 writeFileSync(
   KEYS_PATH,
   JSON.stringify(
     {
-      kid: KID,
-      publicKey,
-      privateKey,
-      createdAt: new Date().toISOString(),
+      primary: { kid, publicKey, privateKey, createdAt },
+      retired: [],
     },
     null,
     2,
@@ -47,9 +52,9 @@ writeFileSync(
 );
 
 console.log(`✓ Generated and persisted RS256 key pair to ${KEYS_PATH}`);
-console.log(`  kid: ${KID}`);
-console.log(`  alg: RS256`);
-console.log(`  createdAt: ${new Date().toISOString()}`);
+console.log(`  kid:       ${kid}`);
+console.log(`  alg:       RS256`);
+console.log(`  createdAt: ${createdAt}`);
 console.log("");
 console.log("Remember to set OAUTH_SESSION_SECRET in your .env:");
 console.log("  openssl rand -base64 48");

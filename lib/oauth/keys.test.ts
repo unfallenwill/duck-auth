@@ -61,19 +61,53 @@ describe("loadKeys", () => {
     const keys = await loadKeys();
 
     expect(keys).toBeDefined();
-    expect(keys.privateKey).toBeDefined();
-    expect(keys.publicKey).toBeDefined();
+    expect(keys.signingKey).toBeDefined();
+    expect(keys.primaryKid).toMatch(/^kid-[0-9a-f]{16}$/);
+    expect(keys.verificationKeys.size).toBe(1);
 
-    // File should have been persisted
+    // File should have been persisted in the new shape
     expect(existsSync(keysPath)).toBe(true);
-
     const raw = JSON.parse(readFileSync(keysPath, "utf8"));
-    expect(raw.kid).toBe("key-1");
-    expect(raw.publicKey).toContain("BEGIN PUBLIC KEY");
-    expect(raw.privateKey).toContain("BEGIN PRIVATE KEY");
+    expect(raw.primary).toBeDefined();
+    expect(raw.primary.kid).toMatch(/^kid-[0-9a-f]{16}$/);
+    expect(raw.primary.publicKey).toContain("BEGIN PUBLIC KEY");
+    expect(raw.primary.privateKey).toContain("BEGIN PRIVATE KEY");
+    expect(raw.retired).toEqual([]);
   });
 
-  it("loads keys when file exists with valid content", async () => {
+  it("loads keys when file exists with valid new shape", async () => {
+    const pair = generateValidKeyPairPem();
+    writeFileSync(
+      keysPath,
+      JSON.stringify({
+        primary: {
+          kid: "kid-abc123",
+          publicKey: pair.publicKey,
+          privateKey: pair.privateKey,
+          createdAt: new Date().toISOString(),
+        },
+        retired: [],
+      }),
+      "utf8",
+    );
+
+    vi.doMock("@/lib/config", () => ({
+      config: { keysPath },
+    }));
+
+    const { loadKeys } = await import("@/lib/oauth/keys");
+    const keys = await loadKeys();
+
+    expect(keys.primaryKid).toBe("kid-abc123");
+    expect(keys.signingKey).toBeDefined();
+    expect(keys.verificationKeys.get("kid-abc123")).toBeDefined();
+
+    // Should not overwrite the file
+    const raw = JSON.parse(readFileSync(keysPath, "utf8"));
+    expect(raw.primary.publicKey).toBe(pair.publicKey);
+  });
+
+  it("auto-migrates legacy single-key shape to new shape", async () => {
     const pair = generateValidKeyPairPem();
     writeFileSync(
       keysPath,
@@ -93,15 +127,95 @@ describe("loadKeys", () => {
     const { loadKeys } = await import("@/lib/oauth/keys");
     const keys = await loadKeys();
 
-    expect(keys.privateKey).toBeDefined();
-    expect(keys.publicKey).toBeDefined();
-    // Should not overwrite the file — it already existed
+    // The legacy kid is preserved so previously-issued tokens keep verifying.
+    expect(keys.primaryKid).toBe("key-1");
+    expect(keys.verificationKeys.get("key-1")).toBeDefined();
+
+    // The migrated file is persisted so we don't migrate again.
     const raw = JSON.parse(readFileSync(keysPath, "utf8"));
-    expect(raw.publicKey).toBe(pair.publicKey);
+    expect(raw.primary.kid).toBe("key-1");
+    expect(raw.retired).toEqual([]);
+  });
+
+  it("loads retired keys into verificationKeys", async () => {
+    const primary = generateValidKeyPairPem();
+    const retired = generateValidKeyPairPem();
+    writeFileSync(
+      keysPath,
+      JSON.stringify({
+        primary: {
+          kid: "kid-primary",
+          publicKey: primary.publicKey,
+          privateKey: primary.privateKey,
+          createdAt: new Date().toISOString(),
+        },
+        retired: [
+          {
+            kid: "kid-retired1",
+            publicKey: retired.publicKey,
+            privateKey: retired.privateKey,
+            createdAt: new Date(Date.now() - 86400_000).toISOString(),
+            retiredAt: new Date(Date.now() + 86400_000).toISOString(),
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    vi.doMock("@/lib/config", () => ({
+      config: { keysPath },
+    }));
+
+    const { loadKeys } = await import("@/lib/oauth/keys");
+    const keys = await loadKeys();
+
+    expect(keys.primaryKid).toBe("kid-primary");
+    expect(keys.verificationKeys.size).toBe(2);
+    expect(keys.verificationKeys.has("kid-primary")).toBe(true);
+    expect(keys.verificationKeys.has("kid-retired1")).toBe(true);
+    expect(keys.jwks.length).toBe(2);
+  });
+
+  it("JWKS contains primary first, then retired", async () => {
+    const primary = generateValidKeyPairPem();
+    const retired = generateValidKeyPairPem();
+    writeFileSync(
+      keysPath,
+      JSON.stringify({
+        primary: {
+          kid: "kid-primary",
+          publicKey: primary.publicKey,
+          privateKey: primary.privateKey,
+          createdAt: new Date().toISOString(),
+        },
+        retired: [
+          {
+            kid: "kid-retired1",
+            publicKey: retired.publicKey,
+            privateKey: retired.privateKey,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    vi.doMock("@/lib/config", () => ({
+      config: { keysPath },
+    }));
+
+    const { loadKeys } = await import("@/lib/oauth/keys");
+    const keys = await loadKeys();
+    expect(keys.jwks[0]?.kid).toBe("kid-primary");
+    expect(keys.jwks[1]?.kid).toBe("kid-retired1");
+    for (const jwk of keys.jwks) {
+      expect(jwk.use).toBe("sig");
+      expect(jwk.alg).toBe("RS256");
+      expect(jwk.kty).toBe("RSA");
+    }
   });
 
   it("regenerates keys when file is corrupted (dev)", async () => {
-    // Write a corrupted keys file
     writeFileSync(keysPath, "NOT VALID JSON {{{}}}", "utf8");
 
     vi.doMock("@/lib/config", () => ({
@@ -111,19 +225,14 @@ describe("loadKeys", () => {
     const { loadKeys } = await import("@/lib/oauth/keys");
     const keys = await loadKeys();
 
-    // In dev, should regenerate and still return valid keys
-    expect(keys.privateKey).toBeDefined();
-    expect(keys.publicKey).toBeDefined();
+    expect(keys.signingKey).toBeDefined();
+    expect(keys.primaryKid).toMatch(/^kid-[0-9a-f]{16}$/);
 
-    // File should now contain valid JSON
     const raw = JSON.parse(readFileSync(keysPath, "utf8"));
-    expect(raw.kid).toBe("key-1");
-    expect(raw.publicKey).toContain("BEGIN PUBLIC KEY");
+    expect(raw.primary.kid).toMatch(/^kid-[0-9a-f]{16}$/);
   });
 
   it("regenerates keys when file has valid JSON but missing key fields (dev)", async () => {
-    // Valid JSON but no actual key data — the validation guard in loadKeys
-    // silently falls through to the regeneration path
     writeFileSync(keysPath, JSON.stringify({ foo: "bar" }), "utf8");
 
     vi.doMock("@/lib/config", () => ({
@@ -133,13 +242,9 @@ describe("loadKeys", () => {
     const { loadKeys } = await import("@/lib/oauth/keys");
     const keys = await loadKeys();
 
-    expect(keys.privateKey).toBeDefined();
-    expect(keys.publicKey).toBeDefined();
-
-    // File should have been overwritten with valid keys
+    expect(keys.signingKey).toBeDefined();
     const raw = JSON.parse(readFileSync(keysPath, "utf8"));
-    expect(raw.kid).toBe("key-1");
-    expect(raw.publicKey).toContain("BEGIN PUBLIC KEY");
+    expect(raw.primary.kid).toMatch(/^kid-[0-9a-f]{16}$/);
   });
 
   it("caches keys across calls (returns same promise)", async () => {
@@ -150,8 +255,6 @@ describe("loadKeys", () => {
     const { loadKeys } = await import("@/lib/oauth/keys");
     const keys1 = await loadKeys();
     const keys2 = await loadKeys();
-
-    // Should be the same object (cached)
     expect(keys1).toBe(keys2);
   });
 
@@ -163,7 +266,6 @@ describe("loadKeys", () => {
     }));
 
     const { loadKeys } = await import("@/lib/oauth/keys");
-
     await expect(loadKeys()).rejects.toThrow(/keys file not found/i);
   });
 
@@ -176,19 +278,199 @@ describe("loadKeys", () => {
     }));
 
     const { loadKeys } = await import("@/lib/oauth/keys");
-
     await expect(loadKeys()).rejects.toThrow(/keys file not found/i);
   });
+});
 
-  it("returns object with privateKey and publicKey properties", async () => {
+describe("generateKid", () => {
+  it("produces kid-<16 hex chars>", async () => {
+    const { generateKid } = await import("@/lib/oauth/keys");
+    const kid = generateKid();
+    expect(kid).toMatch(/^kid-[0-9a-f]{16}$/);
+  });
+
+  it("produces unique kids across calls", async () => {
+    const { generateKid } = await import("@/lib/oauth/keys");
+    const kids = new Set(Array.from({ length: 100 }, () => generateKid()));
+    expect(kids.size).toBe(100);
+  });
+});
+
+describe("rotateKeys", () => {
+  let keysPath: string;
+
+  beforeEach(() => {
+    keysPath = makeTempKeysPath();
+    (process.env as Record<string, string>)['NODE_ENV'] = "development";
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (existsSync(keysPath)) {
+      rmSync(keysPath, { force: true });
+    }
+    (process.env as Record<string, string | undefined>)['NODE_ENV'] = originalNodeEnv;
+    vi.restoreAllMocks();
+  });
+
+  it("promotes new primary and demotes old primary to retired with grace", async () => {
     vi.doMock("@/lib/config", () => ({
       config: { keysPath },
     }));
 
-    const { loadKeys } = await import("@/lib/oauth/keys");
-    const keys = await loadKeys();
+    const { loadKeys, rotateKeys } = await import("@/lib/oauth/keys");
 
-    expect(keys).toHaveProperty("privateKey");
-    expect(keys).toHaveProperty("publicKey");
+    // Seed initial primary.
+    await loadKeys();
+    const before = await loadKeys();
+    const oldKid = before.primaryKid;
+
+    const result = await rotateKeys({ graceSeconds: 3600 });
+
+    expect(result.previousKid).toBe(oldKid);
+    expect(result.newKid).not.toBe(oldKid);
+    expect(result.newKid).toMatch(/^kid-[0-9a-f]{16}$/);
+    expect(new Date(result.retiredUntil).getTime()).toBeGreaterThan(Date.now());
+
+    // Re-load: new primary is active, old is in retired with retiredAt.
+    const after = await loadKeys();
+    expect(after.primaryKid).toBe(result.newKid);
+    expect(after.retired.length).toBe(1);
+    expect(after.retired[0]?.kid).toBe(oldKid);
+    expect(after.retired[0]?.retiredAt).toBeDefined();
+
+    // Both kids verify.
+    expect(after.verificationKeys.has(result.newKid)).toBe(true);
+    expect(after.verificationKeys.has(oldKid)).toBe(true);
+    expect(after.jwks.length).toBe(2);
+  });
+
+  it("chains: rotating twice keeps both previous primaries in retired", async () => {
+    vi.doMock("@/lib/config", () => ({
+      config: { keysPath },
+    }));
+
+    const { loadKeys, rotateKeys } = await import("@/lib/oauth/keys");
+    await loadKeys();
+    const first = (await loadKeys()).primaryKid;
+
+    await rotateKeys({ graceSeconds: 3600 });
+    const second = (await loadKeys()).primaryKid;
+
+    await rotateKeys({ graceSeconds: 3600 });
+    const after = await loadKeys();
+
+    expect(after.primaryKid).not.toBe(first);
+    expect(after.primaryKid).not.toBe(second);
+    expect(after.retired.length).toBe(2);
+    const retiredKids = after.retired.map((r) => r.kid);
+    expect(retiredKids).toContain(first);
+    expect(retiredKids).toContain(second);
+  });
+});
+
+describe("purgeExpiredRetiredKeys", () => {
+  let keysPath: string;
+
+  beforeEach(() => {
+    keysPath = makeTempKeysPath();
+    (process.env as Record<string, string>)['NODE_ENV'] = "development";
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (existsSync(keysPath)) {
+      rmSync(keysPath, { force: true });
+    }
+    (process.env as Record<string, string | undefined>)['NODE_ENV'] = originalNodeEnv;
+    vi.restoreAllMocks();
+  });
+
+  it("removes retired keys whose retiredAt has passed", async () => {
+    const pair = generateValidKeyPairPem();
+    writeFileSync(
+      keysPath,
+      JSON.stringify({
+        primary: {
+          kid: "kid-primary",
+          publicKey: pair.publicKey,
+          privateKey: pair.privateKey,
+          createdAt: new Date().toISOString(),
+        },
+        retired: [
+          {
+            kid: "kid-expired",
+            publicKey: pair.publicKey,
+            privateKey: pair.privateKey,
+            createdAt: new Date(Date.now() - 86400_000).toISOString(),
+            retiredAt: new Date(Date.now() - 60_000).toISOString(), // 1 min ago
+          },
+          {
+            kid: "kid-active",
+            publicKey: pair.publicKey,
+            privateKey: pair.privateKey,
+            createdAt: new Date().toISOString(),
+            retiredAt: new Date(Date.now() + 86400_000).toISOString(), // 1 day future
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    vi.doMock("@/lib/config", () => ({
+      config: { keysPath },
+    }));
+
+    const { purgeExpiredRetiredKeys } = await import("@/lib/oauth/keys");
+    const { purged } = await purgeExpiredRetiredKeys();
+
+    expect(purged).toBe(1);
+    const raw = JSON.parse(readFileSync(keysPath, "utf8"));
+    expect(raw.retired.length).toBe(1);
+    expect(raw.retired[0]?.kid).toBe("kid-active");
+  });
+
+  it("keeps retired keys without retiredAt set (safety)", async () => {
+    const pair = generateValidKeyPairPem();
+    writeFileSync(
+      keysPath,
+      JSON.stringify({
+        primary: {
+          kid: "kid-primary",
+          publicKey: pair.publicKey,
+          privateKey: pair.privateKey,
+          createdAt: new Date().toISOString(),
+        },
+        retired: [
+          {
+            kid: "kid-no-expiry",
+            publicKey: pair.publicKey,
+            privateKey: pair.privateKey,
+            createdAt: new Date().toISOString(),
+            // no retiredAt — should be kept
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    vi.doMock("@/lib/config", () => ({
+      config: { keysPath },
+    }));
+
+    const { purgeExpiredRetiredKeys } = await import("@/lib/oauth/keys");
+    const { purged } = await purgeExpiredRetiredKeys();
+    expect(purged).toBe(0);
+  });
+
+  it("is a no-op when nothing is expired", async () => {
+    vi.doMock("@/lib/config", () => ({
+      config: { keysPath },
+    }));
+
+    const { loadKeys, purgeExpiredRetiredKeys } = await import("@/lib/oauth/keys");
+    await loadKeys(); // seed
+    const { purged } = await purgeExpiredRetiredKeys();
+    expect(purged).toBe(0);
   });
 });

@@ -12,6 +12,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:cleanup": "tsx scripts/cleanup-tokens.ts",
     "db:keys:init": "tsx scripts/init-keys.ts",
+    "db:keys:rotate": "tsx scripts/rotate-keys.ts",
     "e2e": "tsx e2e/flow.ts",
     "e2e:browser": "tsx e2e/browser-flow.ts",
     "e2e:consent": "tsx e2e/consent-flow.ts",
